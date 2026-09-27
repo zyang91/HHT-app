@@ -1,0 +1,93 @@
+# Inference: from GPS fixes to visits and trips
+
+All thresholds are fields of `InferenceConfig` (`Packages/HHTCore/Sources/HHTCore/Inference/InferenceConfig.swift`).
+Defaults shown in brackets. Everything is deterministic and rule-based; tests in
+`Packages/HHTCore/Tests/HHTCoreTests/InferenceTests.swift` cover the 14 fixture scenarios from the brief.
+
+## 1. Cleaning
+- Drop fixes with horizontal accuracy > `maxHorizontalAccuracy` [100 m] (CLVisit events: [250 m]). They stay in the raw table.
+- Drop single-point spikes: A→B and B→C both faster than `maxPlausibleSpeed` [320 m/s] while A→C is not.
+
+## 2. Stay (visit) detection — sequential clustering
+Walk through fixes in time order. A fix reporting speed > 1.5 m/s cannot start a cluster. From a seed fix, keep adding
+fixes while they are within `stayRadius` [100 m] of the running, accuracy-weighted centroid (fixes moving > 1 m/s count 10× less).
+
+When a fix falls outside the radius:
+- **Drift**: if the cluster is established (≥ 60 s) and a later fix within `driftMaxDuration` [120 s] returns inside,
+  the excursion is GPS drift and skipped.
+- **Departure**: otherwise the cluster ends.
+
+**Data gaps** (> `gapThreshold` [15 min] between fixes) are normal: the collector deliberately stops GPS when stationary.
+A gap is treated as *stationary* if CoreMotion shows < `gapMovingSeconds` [5 min] of walking/running/cycling/automotive
+during it, or — with no motion data — if the last fix was recorded in `stationary` collector mode.
+- Stationary gap, next fix inside the radius → the stay continues through the gap.
+- Stationary gap, next fix outside → departure is back-dated from the next fix by distance ÷ a plausible speed
+  (1.4 m/s < 2 km, 10 m/s < 50 km, 25 m/s < 500 km, else 220 m/s air).
+- Moving gap, next fix inside → the stay ends (the person left and came back; the loop becomes a trip).
+
+A cluster becomes a visit if it lasts ≥ `minStayDuration` [5 min]. Its arrival/departure are trimmed to the first/last
+fix within the **core radius** (max(`stayCoreRadius` [35 m], 1.5 × median member distance)) after re-centring on the
+inner half, removing the walk-in / walk-out bias of radius clustering. If the data ends inside a stay that is plausibly
+still ongoing, the visit gets no departure.
+
+**Merging**: consecutive stays ≤ `mergeDistance` [150 m] apart, separated by an excursion shorter than
+`mergeMaxExcursionDuration` [10 min] that never went beyond `mergeMaxExcursionDistance` [250 m], are merged.
+
+## 3. Places
+Each stay is matched to the nearest active place whose radius + `placeMatchSlack` [40 m] contains its centroid
+(named places win over unnamed ones). Otherwise an unnamed place is created with radius `newPlaceRadius` [80 m].
+Naming or categorising a place therefore makes all future visits to it recognised automatically.
+
+## 4. Trips and modes
+A trip connects consecutive visits; its path is every cleaned fix between departure and arrival plus both visit centroids.
+Distance = path length (straight line across gaps). `has_gap` = any > 15 min hole.
+
+**Per-interval class** between consecutive fixes (speed = distance / time; CoreMotion activity at the midpoint):
+- ≥ `airMinSpeed` [70 m/s] → air
+- motion walking / running / cycling → walk / run / bike (vehicle if faster than plausible); automotive → vehicle
+- no motion: < 0.3 m/s still; ≤ `walkMaxSpeed` [2.2] walk; ≤ `bikeMaxSpeed` [7] bike (vehicle across a signal gap); else vehicle
+- "still" intervals take the class of the next moving interval (waiting precedes boarding).
+
+**Segmentation**: run-length encode the classes; repeatedly absorb the shortest run under `minSegmentDuration` [120 s]
+into its longer neighbour. Short access walks under 2 min are therefore folded into the vehicle segment.
+
+**Segment refinement** (vehicle): airplane if avg ≥ 0.6·air speed over > 150 km; intercity rail if ≥ 60 km with
+p90 speed 38–70 m/s (conf 0.35); subway if > 40 % of time is signal loss (no fix for > `movingGapThreshold` [120 s]
+while covering > 300 m) at 4–25 m/s over < 40 km (conf 0.4); else car (conf 0.4–0.5). Bus vs car is not separable
+without GTFS; correct it once and personalisation handles repeats.
+
+**Main mode** = highest in: airplane > intercity rail > coach > ferry > commuter rail > subway > light rail > bus >
+shuttle > taxi > car (driver/passenger/unspecified) > e-bike > bicycle > scooter > run > walk, among segments ≥ 2 min or ≥ 300 m.
+
+**Personalisation**: if the user has corrected earlier trips between the same origin and destination places and ≥ 60 %
+of those corrections agree, that mode is used (confidence grows with the number of corrections). Needs ≥ 2 corrections
+when it contradicts the geometry's mode group.
+
+A trip **needs review** when it is untouched and its mode is unknown or has confidence < 0.5.
+
+Airplane trips also create a `flights` row.
+
+## 5. Confidence
+- Visit: 0.5 + 0.5 × min(1, fixes/5) × min(1, duration/20 min).
+- Trip existence: 0.5 with a data gap, else 0.6 + 0.1 × fixes per minute (≤ 0.95).
+
+## 6. Incremental runs and reprocessing
+`processNew()` runs on launch, on foreground, when the collector declares a stop, and from background refresh.
+It reprocesses from the arrival of the latest visit, loading `contextMargin` [30 min] of earlier fixes so the anchor
+stay is detected exactly as in a full run. `process(from:to:)` rebuilds any range (window widened to whole visits).
+
+Rules that keep user corrections safe:
+1. Records with `user_status ≠ auto`, and auto visits referenced by such trips, are **locked** — never modified
+   (an ongoing locked visit may receive its departure time; logged as `infer_departure`).
+2. A detected stay overlapping a locked trip or a user-deleted visit is ignored (the user said it was travel / not a stop).
+3. A detected stay overlapping a locked visit is absorbed by it.
+4. Auto visits matched by a detection are updated **in place** (stable IDs); unmatched ones are deleted with their auto trips.
+5. Auto trips in the window are rebuilt; no trip is created where a locked trip already covers the interval.
+
+Tests assert: incremental == one-shot, repeated runs change nothing, edits survive full rebuilds, deleted stops stay deleted.
+
+## Known limitations / next steps
+- Bus vs car vs ride-hail needs GTFS/route matching.
+- Short (< 2 min) access/egress walks are merged into the main segment.
+- The collector's region-exit wake-up can lag departure by a few minutes; CLVisit departure events and back-dating correct most of it.
+- Place centroids of inferred places are not re-estimated from later visits yet.

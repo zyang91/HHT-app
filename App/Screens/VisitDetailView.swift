@@ -1,0 +1,280 @@
+import SwiftUI
+import MapKit
+import HHTCore
+
+struct VisitDetailView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let visitID: String
+
+    @State private var visit: Visit?
+    @State private var place: Place?
+    @State private var arrival = Date()
+    @State private var departure = Date()
+    @State private var ongoing = false
+    @State private var notes = ""
+    @State private var history: [AuditEntry] = []
+    @State private var showPlacePicker = false
+    @State private var showSplit = false
+    @State private var confirmDelete = false
+    @State private var editPlace: IDBox?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let v = visit { content(v) } else { ProgressView() }
+            }
+            .navigationTitle("Visit")
+            .inlineTitle()
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { saveNotes(); dismiss() } } }
+            .task(id: model.revision) { load() }
+        }
+    }
+
+    @ViewBuilder private func content(_ v: Visit) -> some View {
+        Form {
+            Section {
+                Map(initialPosition: .region(MKCoordinateRegion(center: v.coordinate.cl, latitudinalMeters: 600, longitudinalMeters: 600))) {
+                    if let p = place {
+                        MapCircle(center: p.coordinate.cl, radius: p.radius).foregroundStyle(.blue.opacity(0.15)).stroke(.blue, lineWidth: 1)
+                    }
+                    Marker(place?.displayName ?? "Visit", coordinate: v.coordinate.cl)
+                }
+                .mapStyle(.standard(pointsOfInterest: .including([.restaurant, .cafe, .university, .airport, .publicTransport, .store, .hospital, .park])))
+                .frame(height: 200).listRowInsets(EdgeInsets())
+            }
+
+            Section("Place") {
+                HStack {
+                    Image(systemName: place?.category?.symbol ?? "mappin")
+                    VStack(alignment: .leading) {
+                        Text(place?.isNamed == true ? place!.displayName : "Unnamed place").font(.headline)
+                        if let a = place?.address { Text(a).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                Button { showPlacePicker = true } label: { Label("Wrong place? Choose or create…", systemImage: "arrow.triangle.swap") }
+                if let p = place {
+                    Button { editPlace = IDBox(id: p.id) } label: {
+                        Label(p.isNamed ? "Edit “\(p.displayName)” (all visits)" : "Name this place", systemImage: "pencil")
+                    }
+                }
+            }
+
+            Section("Purpose") {
+                Picker("Activity", selection: Binding(
+                    get: { v.purpose },
+                    set: { p in model.perform { try model.edit.setVisitPurpose(v.id, p) } })) {
+                    Text(place?.category?.defaultPurpose.map { "Auto (\($0.label))" } ?? "Not set").tag(TripPurpose?.none)
+                    ForEach(TripPurpose.allCases) { p in Text(p.label).tag(TripPurpose?.some(p)) }
+                }
+            }
+
+            Section("Time") {
+                DatePicker("Arrived", selection: $arrival)
+                Toggle("Still here", isOn: $ongoing)
+                if !ongoing { DatePicker("Left", selection: $departure, in: arrival...) }
+                if timesChanged(v) {
+                    Button("Save times") {
+                        model.perform { try model.edit.setVisitTimes(v.id, arrival: arrival, departure: ongoing ? nil : departure) }
+                    }
+                }
+                Text(Fmt.duration((ongoing ? Date() : departure).timeIntervalSince(arrival))).foregroundStyle(.secondary)
+            }
+
+            Section("Notes") {
+                TextField("Add a note", text: $notes, axis: .vertical).onSubmit(saveNotes)
+            }
+
+            Section {
+                if v.userStatus == .auto {
+                    Button { model.perform { try model.edit.confirm(visitID: v.id) } } label: {
+                        Label("Looks right", systemImage: "checkmark.circle")
+                    }
+                }
+                Button { showSplit = true } label: { Label("I left and came back / add a missing stop", systemImage: "arrow.uturn.right") }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("This wasn't a stop", systemImage: "trash") }
+            }
+
+            Section("Details") {
+                LabeledContent("Status", value: v.userStatus.rawValue)
+                LabeledContent("Source", value: v.source.rawValue)
+                if let c = v.autoConfidence { LabeledContent("Confidence", value: Fmt.percent(c)) }
+                if let n = v.pointCount { LabeledContent("GPS fixes", value: "\(n)") }
+                LabeledContent("Visit ID", value: String(v.id.prefix(8)))
+                if !history.isEmpty {
+                    DisclosureGroup("Edit history (\(history.count))") {
+                        ForEach(Array(history.enumerated()), id: \.offset) { _, h in
+                            Text("\(h.action) \(h.field ?? ""): \(h.oldValue ?? "∅") → \(h.newValue ?? "∅")").font(.caption2)
+                        }
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Remove this visit?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Remove and join the trips before/after", role: .destructive) {
+                model.perform { try model.edit.deleteVisit(v.id) }
+                dismiss()
+            }
+        } message: { Text("Use this for traffic lights, transfers or GPS noise that looked like a stop.") }
+        .sheet(isPresented: $showPlacePicker) {
+            PlacePickerView(near: v.coordinate) { choice in
+                switch choice {
+                case .existing(let id): model.perform { try model.edit.setVisitPlace(v.id, placeID: id) }
+                case .new(let name, let cat): model.perform { try model.edit.createPlace(forVisit: v.id, name: name, category: cat) }
+                }
+            }
+            .environmentObject(model)
+        }
+        .sheet(item: $editPlace) { box in NavigationStack { PlaceDetailView(placeID: box.id) }.environmentObject(model) }
+        .sheet(isPresented: $showSplit) { SplitVisitSheet(visit: v).environmentObject(model) }
+    }
+
+    private func timesChanged(_ v: Visit) -> Bool {
+        abs(arrival.timeIntervalSince(v.arrival)) > 30 || ongoing != (v.departure == nil)
+            || (!ongoing && abs(departure.timeIntervalSince(v.departure ?? departure)) > 30)
+    }
+
+    private func saveNotes() {
+        guard let v = visit, notes != (v.notes ?? "") else { return }
+        model.perform { try model.edit.setNotes(visitID: v.id, notes) }
+    }
+
+    private func load() {
+        guard let v = try? model.store.visit(visitID) else { visit = nil; return }
+        visit = v
+        place = v.placeID.flatMap { try? model.store.place($0) }
+        arrival = v.arrival
+        departure = v.departure ?? Date()
+        ongoing = v.departure == nil
+        notes = v.notes ?? ""
+        history = (try? model.store.auditLog(entityID: v.id)) ?? []
+    }
+}
+
+enum PlaceChoice { case existing(String), new(String, PlaceCategory?) }
+
+struct PlacePickerView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let near: Coordinate
+    var onPick: (PlaceChoice) -> Void
+
+    @State private var query = ""
+    @State private var places: [Place] = []
+    @State private var newName = ""
+    @State private var newCategory: PlaceCategory? = nil
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("New place here") {
+                    TextField("Name (e.g. Home, Penn, 30th St Station)", text: $newName)
+                    Picker("Category", selection: $newCategory) {
+                        Text("None").tag(PlaceCategory?.none)
+                        ForEach(PlaceCategory.allCases) { c in Label(c.label, systemImage: c.symbol).tag(PlaceCategory?.some(c)) }
+                    }
+                    Button("Create and use") {
+                        onPick(.new(newName.trimmingCharacters(in: .whitespaces), newCategory))
+                        dismiss()
+                    }
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Section(query.isEmpty ? "Nearby" : "Matches") {
+                    ForEach(filtered) { p in
+                        Button {
+                            onPick(.existing(p.id))
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Image(systemName: p.category?.symbol ?? "mappin").frame(width: 24)
+                                VStack(alignment: .leading) {
+                                    Text(p.displayName).foregroundStyle(.primary)
+                                    Text(Fmt.distance(Geo.distance(p.coordinate, near)) + " away").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search your places")
+            .navigationTitle("Choose place")
+            .inlineTitle()
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .onAppear {
+                places = ((try? model.store.places()) ?? []).sorted { Geo.distance($0.coordinate, near) < Geo.distance($1.coordinate, near) }
+            }
+        }
+    }
+
+    private var filtered: [Place] {
+        if query.isEmpty { return Array(places.filter { $0.isNamed || Geo.distance($0.coordinate, near) < 1000 }.prefix(30)) }
+        return places.filter { $0.displayName.localizedCaseInsensitiveContains(query) || ($0.code ?? "").localizedCaseInsensitiveContains(query) }
+    }
+}
+
+/// "I left and came back", optionally via a stop somewhere.
+struct SplitVisitSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let visit: Visit
+    @State private var leave = Date()
+    @State private var back = Date()
+    @State private var withStop = false
+    @State private var stopPlaceID: String?
+    @State private var stopArrive = Date()
+    @State private var stopLeave = Date()
+    @State private var mode: TravelMode = .walk
+    @State private var places: [Place] = []
+
+    private var upper: Date { visit.departure ?? Date() }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Left", selection: $leave, in: visit.arrival...upper)
+                    DatePicker("Came back", selection: $back, in: leave...upper)
+                    Picker("Mode", selection: $mode) {
+                        ForEach(TravelMode.allCases) { m in Label(m.label, systemImage: m.symbol).tag(m) }
+                    }
+                }
+                Section {
+                    Toggle("I went somewhere specific", isOn: $withStop)
+                    if withStop {
+                        Picker("Place", selection: $stopPlaceID) {
+                            Text("Choose…").tag(String?.none)
+                            ForEach(places) { p in Text(p.displayName).tag(String?.some(p.id)) }
+                        }
+                        DatePicker("Arrived there", selection: $stopArrive, in: leave...back)
+                        DatePicker("Left there", selection: $stopLeave, in: stopArrive...back)
+                    }
+                } footer: {
+                    Text("Creates the missing trip(s). Places must exist already — create one from any visit or in Places.")
+                }
+            }
+            .navigationTitle("Split visit")
+            .inlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        model.perform {
+                            let stop = withStop ? stopPlaceID.map { (placeID: $0, arrival: stopArrive, departure: stopLeave) } : nil
+                            try model.edit.splitVisit(visit.id, leave: leave, back: back, stop: stop, mode: mode)
+                        }
+                        dismiss()
+                    }
+                    .disabled(withStop && stopPlaceID == nil)
+                }
+            }
+            .onAppear {
+                let mid = visit.arrival.addingTimeInterval(upper.timeIntervalSince(visit.arrival) / 2)
+                leave = mid
+                back = min(upper.addingTimeInterval(-60), mid.addingTimeInterval(1800))
+                stopArrive = leave.addingTimeInterval(600)
+                stopLeave = back.addingTimeInterval(-600)
+                places = ((try? model.store.places()) ?? []).filter(\.isNamed)
+            }
+        }
+    }
+}

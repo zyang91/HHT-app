@@ -1,0 +1,264 @@
+import Foundation
+
+/// Turns raw observations into visits and trips, without ever overwriting user-corrected records.
+///
+/// Reprocessing contract (docs/inference.md §6):
+/// * Records with `user_status != 'auto'` (and auto visits referenced by such trips) are *locked*.
+/// * Locked records are never modified, except that an ongoing locked visit may receive a departure time.
+/// * Detected stays/movements that overlap locked records are absorbed by them.
+/// * Auto records inside the window are updated in place when they match a detection (stable IDs),
+///   otherwise deleted and replaced.
+public final class InferenceEngine {
+    public let store: TravelStore
+    public var config: InferenceConfig
+    /// Optional hook to enrich newly created places (e.g. reverse geocoding, if the user enabled it).
+    public var onPlaceCreated: ((Place) -> Void)?
+
+    public init(store: TravelStore, config: InferenceConfig = .default) {
+        self.store = store
+        self.config = config
+    }
+
+    public struct Report: Equatable, Sendable {
+        public var windowStart: Date
+        public var windowEnd: Date
+        public var pointsConsidered = 0
+        public var visitsCreated = 0
+        public var visitsUpdated = 0
+        public var visitsRemoved = 0
+        public var tripsCreated = 0
+        public var tripsRemoved = 0
+        public var placesCreated = 0
+    }
+
+    /// Incremental run: reprocesses from the arrival of the latest visit (or the first point) to now.
+    @discardableResult
+    public func processNew(now: Date = Date()) throws -> Report {
+        let start: Date
+        if let latest = try store.latestVisit(includeDeleted: true) {
+            start = latest.arrival
+        } else if let first = store.firstPointDate() {
+            start = first
+        } else {
+            return Report(windowStart: now, windowEnd: now)
+        }
+        return try process(from: start, to: now, now: now)
+    }
+
+    /// Reprocess a time range. The window is widened to whole visits at both ends.
+    @discardableResult
+    public func process(from requestedStart: Date, to requestedEnd: Date, now: Date = Date()) throws -> Report {
+        // widen to visit boundaries so we never cut a stay in half
+        var from = requestedStart, to = min(requestedEnd, now)
+        if let v = try store.visits(overlapping: from, from, includeDeleted: true).first { from = min(from, v.arrival) }
+        if let v = try store.visits(overlapping: to, to, includeDeleted: true).last {
+            to = max(to, min(v.departure ?? now, now))
+        }
+
+        var report = Report(windowStart: from, windowEnd: to)
+        try store.db.transaction {
+            // a little context before the window so the anchor stay is detected exactly as in a full run
+            let points = try store.points(from: from.addingTimeInterval(-config.contextMargin), to: to)
+            report.pointsConsidered = points.count
+            let motion = MotionTimeline(try store.motion(from: from.addingTimeInterval(-3600), to: to))
+            let detector = StayDetector(config: config)
+            let clean = detector.clean(points)
+            let stays = detector.mergeStays(detector.detect(points, motion: motion, now: now), points: clean)
+                .filter { ($0.end ?? now) > from }
+
+            // existing records in the window
+            let existingVisits = try store.visits(overlapping: from, to, includeDeleted: true)
+                .filter { $0.arrival >= from && $0.arrival <= to }
+            let existingTrips = try store.trips(overlapping: from, to, includeDeleted: true, withSegments: false)
+                .filter { $0.departure >= from && $0.departure <= to }
+            let lockedTrips = existingTrips.filter { $0.userStatus.isLocked }
+            let lockedVisitIDs = Set(lockedTrips.flatMap { [$0.originVisitID, $0.destinationVisitID].compactMap { $0 } })
+            func isLocked(_ v: Visit) -> Bool { v.userStatus.isLocked || lockedVisitIDs.contains(v.id) }
+            let lockedVisits = existingVisits.filter(isLocked)
+            var reusableAuto = existingVisits.filter { !isLocked($0) && !$0.deleted }
+            var keptVisitIDs = Set<String>()
+
+            func overlap(_ a0: Date, _ a1: Date, _ b0: Date, _ b1: Date) -> TimeInterval {
+                max(0, min(a1, b1).timeIntervalSince(max(a0, b0)))
+            }
+
+            // 1. resolve each detected stay to a visit (locked, reused auto, or new)
+            var resolved: [Visit] = []
+            for stay in stays {
+                let sEnd = stay.end ?? now
+                let sDur = max(1, sEnd.timeIntervalSince(stay.start))
+                // user said this time was travel, or deleted this stop
+                if lockedTrips.contains(where: { !$0.deleted && overlap($0.departure, $0.arrival, stay.start, sEnd) > 0.5 * sDur })
+                    || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0.5 * sDur }) {
+                    continue
+                }
+                if var lv = lockedVisits.first(where: { !$0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {
+                    if lv.departure == nil, let e = stay.end {
+                        lv.departure = e
+                        lv.updatedAt = Date()
+                        try store.upsertVisit(lv)
+                        try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
+                    }
+                    if resolved.last?.id != lv.id { resolved.append(lv) } else { resolved[resolved.count - 1] = lv }
+                    keptVisitIDs.insert(lv.id)
+                    continue
+                }
+                let place = try resolvePlace(for: stay.centroid, report: &report)
+                if let idx = reusableAuto.firstIndex(where: { overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {
+                    var v = reusableAuto.remove(at: idx)
+                    let changed = v.arrival != stay.start || v.departure != stay.end || v.placeID != place.id
+                    v.arrival = stay.start; v.departure = stay.end; v.coordinate = stay.centroid
+                    v.placeID = place.id; v.pointCount = stay.pointCount; v.autoConfidence = stay.confidence
+                    if changed { v.updatedAt = Date(); report.visitsUpdated += 1 }
+                    try store.upsertVisit(v)
+                    resolved.append(v); keptVisitIDs.insert(v.id)
+                } else {
+                    let v = Visit(placeID: place.id, arrival: stay.start, departure: stay.end, coordinate: stay.centroid,
+                                  autoConfidence: stay.confidence, source: .inferred, userStatus: .auto,
+                                  timeZone: tzAt(stay.start, points: points), pointCount: stay.pointCount)
+                    try store.upsertVisit(v)
+                    resolved.append(v); keptVisitIDs.insert(v.id); report.visitsCreated += 1
+                }
+            }
+            // locked (non-deleted) visits that weren't matched still belong in the sequence
+            for lv in lockedVisits where !lv.deleted && !keptVisitIDs.contains(lv.id) {
+                resolved.append(lv); keptVisitIDs.insert(lv.id)
+            }
+            resolved.sort { $0.arrival < $1.arrival }
+
+            // 2. drop auto trips in the window; they are rebuilt below
+            for t in existingTrips where !t.userStatus.isLocked {
+                try store.db.run("UPDATE flights SET trip_id = NULL WHERE trip_id = ?", t.id)
+                try store.db.run("DELETE FROM trips WHERE id = ?", t.id)
+                report.tripsRemoved += 1
+            }
+            // 3. remove auto visits that no detection supports any more
+            for v in reusableAuto {
+                for t in try store.tripsReferencing(visitID: v.id) where !t.userStatus.isLocked {
+                    try store.db.run("UPDATE flights SET trip_id = NULL WHERE trip_id = ?", t.id)
+                    try store.db.run("DELETE FROM trips WHERE id = ?", t.id)
+                    report.tripsRemoved += 1
+                }
+                try store.db.run("DELETE FROM trips WHERE deleted = 1 AND user_status = 'auto' AND (origin_visit_id = ? OR destination_visit_id = ?)", v.id, v.id)
+                try store.db.run("DELETE FROM visits WHERE id = ?", v.id)
+                report.visitsRemoved += 1
+            }
+
+            // 4. link the visit that precedes the window, if it has no outgoing trip yet
+            if let first = resolved.first,
+               let prev = try store.db.query("""
+                    SELECT * FROM visits WHERE deleted = 0 AND arrival_ts < ? ORDER BY arrival_ts DESC LIMIT 1
+                    """, first.arrival).first.map(TravelStore.visit),
+               prev.departure != nil,
+               try store.tripsReferencing(visitID: prev.id).allSatisfy({ $0.originVisitID != prev.id }) {
+                resolved.insert(prev, at: 0)
+            }
+
+            // 5. build trips between consecutive visits
+            if resolved.count >= 2 {
+                for i in 1..<resolved.count {
+                    let a = resolved[i - 1], b = resolved[i]
+                    guard let dep = a.departure, b.arrival > dep else { continue }
+                    if lockedTrips.contains(where: { !$0.deleted && overlap($0.departure, $0.arrival, dep, b.arrival) > 0 }) { continue }
+                    if try store.tripsReferencing(visitID: a.id).contains(where: { $0.originVisitID == a.id }) { continue }
+                    let trip = try buildTrip(from: a, to: b, points: clean, motion: motion)
+                    try store.upsertTrip(trip)
+                    report.tripsCreated += 1
+                    if trip.mode == .airplane { try linkFlight(for: trip, from: a, to: b) }
+                }
+            }
+            try store.pruneOrphanPlaces()
+        }
+        try store.setMeta("last_inference_at", iso(now))
+        return report
+    }
+
+    // MARK: - Helpers
+
+    private func resolvePlace(for c: Coordinate, report: inout Report) throws -> Place {
+        if let p = try store.matchPlace(c, slack: config.placeMatchSlack) {
+            return p.mergedInto.flatMap { try? store.place($0) } ?? p
+        }
+        let p = Place(coordinate: c, radius: config.newPlaceRadius, source: .inferred)
+        try store.upsertPlace(p)
+        report.placesCreated += 1
+        onPlaceCreated?(p)
+        return p
+    }
+
+    func buildTrip(from a: Visit, to b: Visit, points: [RawPoint], motion: MotionTimeline) throws -> Trip {
+        let dep = a.departure ?? a.arrival
+        let arr = b.arrival
+        var path = points.filter { $0.timestamp > dep && $0.timestamp < arr }
+        path.insert(RawPoint(timestamp: dep, coordinate: a.coordinate, source: "anchor"), at: 0)
+        path.append(RawPoint(timestamp: arr, coordinate: b.coordinate, source: "anchor"))
+
+        let classifier = ModeClassifier(config: config)
+        let segs = classifier.segment(path: path, motion: motion)
+        let tripID = newID()
+        let segments: [TripSegment] = segs.enumerated().map { i, s in
+            TripSegment(tripID: tripID, sequence: i, start: s.start, end: s.end, modeAuto: s.mode,
+                        modeConfidence: s.confidence, distance: s.distance,
+                        routePolyline: Polyline.encode(Geo.simplify(s.coordinates, tolerance: config.routeSimplifyTolerance)))
+        }
+        var mode = ModeClassifier.mainMode(segs.map { ($0.mode, $0.end.timeIntervalSince($0.start), $0.distance) })
+        var modeConf = segs.filter { $0.mode == mode }.map(\.confidence).max() ?? 0.2
+
+        // personalisation: what the user chose before on this OD pair
+        if let o = a.placeID, let d = b.placeID {
+            let past = try store.correctedModes(originPlaceID: o, destinationPlaceID: d)
+            if let top = mostCommon(past) {
+                let share = Double(past.filter { $0 == top }.count) / Double(past.count)
+                if share >= 0.6 && (past.count >= 2 || top.group == mode.group || mode == .unknown) {
+                    mode = top
+                    modeConf = min(0.9, 0.5 + 0.1 * Double(past.count)) * share
+                }
+            }
+        }
+
+        let coords = path.map(\.coordinate)
+        let hasGap = zip(path, path.dropFirst()).contains { $1.timestamp.timeIntervalSince($0.timestamp) > config.gapThreshold }
+        let density = Double(path.count - 2) / max(1, arr.timeIntervalSince(dep) / 60)   // points per minute
+        let existence = hasGap ? 0.5 : min(0.95, 0.6 + 0.1 * density)
+        return Trip(id: tripID, originVisitID: a.id, destinationVisitID: b.id, departure: dep, arrival: arr,
+                    distance: Geo.pathLength(coords), modeAuto: mode, modeConfidence: modeConf.rounded(toPlaces: 2),
+                    routePolyline: Polyline.encode(Geo.simplify(coords, tolerance: config.routeSimplifyTolerance)),
+                    hasGap: hasGap, autoConfidence: existence.rounded(toPlaces: 2), source: .inferred, userStatus: .auto,
+                    timeZone: a.timeZone, segments: segments)
+    }
+
+    private func linkFlight(for trip: Trip, from a: Visit, to b: Visit) throws {
+        guard try store.flight(tripID: trip.id) == nil else { return }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = trip.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+        let oPlace = try a.placeID.flatMap(store.place)
+        let dPlace = try b.placeID.flatMap(store.place)
+        let f = Flight(tripID: trip.id, date: fmt.string(from: trip.departure),
+                       originCode: oPlace?.category == .airport ? oPlace?.code : nil,
+                       destinationCode: dPlace?.category == .airport ? dPlace?.code : nil,
+                       origin: a.coordinate, destination: b.coordinate, departure: trip.departure, arrival: trip.arrival,
+                       distance: Geo.distance(a.coordinate, b.coordinate), source: .inferred)
+        try store.upsertFlight(f)
+    }
+
+    private func tzAt(_ t: Date, points: [RawPoint]) -> String? {
+        points.min { abs($0.timestamp.timeIntervalSince(t)) < abs($1.timestamp.timeIntervalSince(t)) }?.timeZone
+            ?? TimeZone.current.identifier
+    }
+}
+
+func mostCommon<T: Hashable>(_ xs: [T]) -> T? {
+    var counts: [T: Int] = [:]
+    for x in xs { counts[x, default: 0] += 1 }
+    // stable: ties go to the earliest (most recent) element
+    return xs.first { counts[$0] == counts.values.max() }
+}
+
+let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+}()
+
+func iso(_ d: Date?) -> String? { d.map { isoFormatter.string(from: $0) } }

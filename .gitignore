@@ -1,0 +1,10 @@
+.DS_Store
+
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+analysis/data/
+analysis/.venv/
+__pycache__/
+*.sqlite
