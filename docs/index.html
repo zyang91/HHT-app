@@ -8,11 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site-chrome.css">
 <style>
   :root {
     --bg: #faf8f4; --surface: #fff; --surface-warm: #f5f2ec;
-    --ink: #111; --ink-navy: #0b2345; --ink-soft: rgba(17,17,17,.66); --ink-faint: rgba(17,17,17,.45);
-    --red: #a51c30; --blue: #456a96; --sand: #e9dcc7; --sage: #c8d5c5; --terracotta: #d76a54;
+    --ink: #0b2345; --ink-navy: #0b2345; --ink-soft: rgba(11,35,69,.72); --ink-faint: rgba(11,35,69,.5);
+    --red: #a51c30; --blue: #456a96; --sand: #e9dcc7; --sand-deep: #d9c5a5; --sage: #c8d5c5; --terracotta: #d76a54;
     --line: rgba(11,35,69,.14); --line-soft: rgba(11,35,69,.08); --num: #efece4;
     --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
     --sans: 'Inter', system-ui, -apple-system, sans-serif;
@@ -22,14 +23,6 @@
   body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 var(--sans); }
   a { color: inherit; }
   .container { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
-
-  /* nav */
-  header.site { border-bottom: 1px solid var(--line-soft); }
-  header.site .container { display: flex; align-items: center; justify-content: space-between; height: 58px; gap: 16px; }
-  .brand { font: 600 17px var(--serif); color: var(--ink-navy); text-decoration: none; white-space: nowrap; }
-  nav.links { display: flex; gap: 26px; overflow-x: auto; }
-  nav.links a { font: 500 13.76px var(--sans); letter-spacing: .04em; color: rgba(11,35,69,.72); text-decoration: none; white-space: nowrap; padding: 4px 0; }
-  nav.links a.active { color: var(--red); border-bottom: 1.5px solid var(--red); }
 
   /* hero */
   .hero { padding: 64px 0 56px; border-bottom: 1px solid var(--line); }
@@ -80,13 +73,8 @@
   ul.plain li:last-child { border-bottom: 1px solid var(--line-soft); }
   ul.plain li b { font-family: var(--sans); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-navy); margin-right: 8px; }
 
-  footer.site { padding: 48px 0 60px; color: var(--ink-soft); font-size: 14px; }
-  footer.site .container { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
-  footer.site .brand { display: block; margin-bottom: 4px; }
-
   @media (max-width: 760px) {
     .container { padding: 0 16px; }
-    nav.links { gap: 16px; }
     .hero { padding: 40px 0 40px; }
     .lede-row { grid-template-columns: 1fr; gap: 20px; }
     .item-head { grid-template-columns: 1fr; }
@@ -96,27 +84,91 @@
     .diary { grid-template-columns: 74px 18px minmax(0, 1fr); column-gap: 6px; }
     figure.plate { padding: 16px 14px; }
   }
+
+  .container { padding: 0 36px; }
+  body { -webkit-font-smoothing: antialiased; }
+  .hero { padding: 120px 0 58px; }
+  .tags { margin-bottom: 34px; }
+  .hero-grid { display: grid; grid-template-columns: 1fr 1.1fr; align-items: center; gap: 24px; }
+  h1 { font-size: clamp(54px, 6.2vw, 82px); line-height: 1.03; margin-bottom: 24px; }
+  .hero-dek { max-width: 30ch; font: 400 21px/1.55 var(--serif); color: var(--ink-soft); }
+  .hero-figure { margin: 0 -20px 0 0; }
+  .hero-figure img { display: block; width: 100%; height: auto; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 22px; margin: 28px 0; align-items: center; }
+  .hero-actions a { font: 500 13px/1.5 var(--sans); text-decoration: none; }
+  .source-link { padding: 12px 19px; background: var(--ink); color: var(--bg); border-radius: 3px; }
+  .source-link:hover { background: var(--red); }
+  .read-link { color: var(--red); }
+  .lede-row { margin-top: 34px; padding-top: 30px; border-top: 1px solid var(--line); }
+  .kicker { color: var(--red); }
+  .n { color: var(--sand-deep); }
+  .footer-name, .footer-identity { margin-top: 0; }
+  .footer-identity { margin-bottom: 0; }
+  section.item { scroll-margin-top: 90px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--red); outline-offset: 5px; }
+  @media (max-width: 1000px) { .nav-affil { display: none; } .nav-links { gap: 20px; } }
+  @media (max-width: 760px) {
+    .container { padding: 0 24px; }
+    .hero { padding: 102px 0 40px; }
+    .hero-grid { grid-template-columns: 1fr; gap: 8px; }
+    .hero-figure { margin: 0; }
+    .hero-dek { max-width: 34ch; }
+    .tags { font-size: 10px; letter-spacing: .12em; margin-bottom: 26px; }
+    .lede-row { margin-top: 24px; }
+    .footer-links { gap: 16px 24px; }
+    .site-footer { padding: 56px 0 32px; }
+  }
+  @media (max-width: 720px) {
+    .site-nav .nav-inner { padding: 14px 24px; }
+    .nav-toggle { display: flex; }
+    .nav-links { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg); border-bottom: 1px solid var(--line); flex-direction: column; align-items: stretch; gap: 0; padding: 8px 24px 18px; display: none; }
+    .nav-links.open { display: flex; }
+    .nav-links a { padding: 10px 0; font-size: 1rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 </style>
 </head>
 <body>
 
-<header class="site">
-  <div class="container">
-    <a class="brand" href="https://zhanchaoyang.com/">Zhanchao Yang</a>
-    <nav class="links">
-      <a href="https://zhanchaoyang.com/#research">Research</a>
-      <a href="https://zhanchaoyang.com/#work">Work</a>
-      <a class="active" href="https://zhanchaoyang.com/pages/blog.html">Thoughts</a>
-      <a href="https://github.com/zyang91/HHT-app">Code</a>
-    </nav>
-  </div>
-</header>
+<header class="site-nav" id="site-nav">
+			<div class="nav-inner">
+				<div class="nav-brand">
+					<a class="nav-name" href="https://www.zhanchaoyang.com/">Zhanchao Yang</a>
+					<span class="nav-affil">Penn Weitzman</span>
+				</div>
+				<button
+					class="nav-toggle"
+					id="nav-toggle"
+					aria-label="Open menu"
+					aria-expanded="false"
+					aria-controls="nav-links"
+				>
+					<span></span><span></span><span></span>
+				</button>
+				<nav aria-label="Main navigation" class="nav-links" id="nav-links">
+					<a href="https://www.zhanchaoyang.com/pages/research.html">Research</a>
+					<a href="https://www.zhanchaoyang.com/pages/professional-work.html">Work</a>
+					<a class="active" href="https://www.zhanchaoyang.com/pages/blog.html">Thoughts</a>
+					<a href="https://www.zhanchaoyang.com/pages/cv.html">CV</a>
+					<a href="https://www.zhanchaoyang.com/pages/awards.html">Awards</a>
+					<a href="https://www.zhanchaoyang.com/pages/about-me.html">About</a>
+					<a href="https://www.zhanchaoyang.com/pages/contact.html">Contact</a>
+				</nav>
+			</div>
+		</header>
 
 <main>
   <div class="hero">
     <div class="container">
       <p class="tags"><span>Experiments</span><span>iOS</span><span>Travel behavior</span><span>N-of-1</span><span>SQLite · SwiftUI</span></p>
-      <h1>A travel survey <em>of one</em>.</h1>
+      <div class="hero-grid">
+        <div>
+          <h1>A travel survey <em>of one</em>.</h1>
+          <p class="hero-dek">One person. Every day. A little city of routines, detours, and discoveries.</p>
+          <div class="hero-actions"><a class="source-link" href="https://github.com/zyang91/HHT-app">Explore the code ↗</a><a class="read-link" href="#the-diary">Read the field notes ↓</a></div>
+        </div>
+        <figure class="hero-figure"><img src="assets/hht-daily-journey.png" width="1536" height="1024" fetchpriority="high" alt="A miniature Philadelphia unfolds from a phone, with a looping route connecting home, campus, coffee, cycling and the subway."></figure>
+      </div>
       <div class="lede-row">
         <p class="lede">Household travel surveys ask thousands of people to remember one weekday. I wanted the opposite: one person, every day, for years. HHT is a private iPhone app that quietly records where I go and rebuilds each day into visits, trips, modes and trip chains, then gets out of the way.</p>
         <p class="aside">Built for exactly one user. Not on the App Store, no account, no server. The data never leaves the phone unless I export it.</p>
@@ -124,7 +176,7 @@
     </div>
   </div>
 
-  <section class="item">
+  <section class="item" id="the-diary">
     <div class="container">
       <div class="item-head">
         <span class="n">01</span>
@@ -211,12 +263,58 @@
   </section>
 </main>
 
-<footer class="site">
-  <div class="container">
-    <div><a class="brand" href="https://zhanchaoyang.com/">Zhanchao Yang</a>Urban Planning · Transportation · Spatial Analytics</div>
-    <div><a href="https://github.com/zyang91/HHT-app">Source on GitHub</a> · © 2026 · Philadelphia, PA</div>
-  </div>
-</footer>
+<footer class="site-footer">
+			<div class="container">
+				<div class="footer-grid">
+					<div>
+						<p class="footer-name">Zhanchao Yang</p>
+						<p class="footer-identity">
+							Urban Planning <span class="dot">·</span> Transportation
+							<span class="dot">·</span> Spatial Analytics
+						</p>
+					</div>
+					<nav aria-label="Footer navigation" class="footer-links">
+						<a href="mailto:zhanchao@upenn.edu">Email</a>
+						<a href="https://www.zhanchaoyang.com/pages/research.html">Research</a>
+						<a href="https://www.zhanchaoyang.com/pages/professional-work.html">Work</a>
+						<a href="https://www.zhanchaoyang.com/pages/blog.html">Thoughts</a>
+						<a href="https://www.zhanchaoyang.com/pages/cv.html">CV</a>
+						<a href="https://www.zhanchaoyang.com/pages/awards.html">Awards</a>
+						<a href="https://www.zhanchaoyang.com/pages/about-me.html">About</a>
+						<a href="https://www.zhanchaoyang.com/pages/contact.html">Contact</a>
+						<a href="https://github.com/zyang91" target="_blank" rel="noopener">GitHub</a>
+						<a href="https://www.linkedin.com/in/zhanchaoyang/" target="_blank" rel="noopener">LinkedIn</a>
+					</nav>
+				</div>
+				<div class="footer-hometown">
+					<img src="assets/qingdao-footer.png" width="2172" height="724"
+						alt="Qingdao, my hometown — a sketch of Zhanqiao Pier and the seafront."
+						loading="lazy" decoding="async" />
+				</div>
+				<div class="footer-note">
+					<span>© <span id="year">2026</span> Zhanchao Yang</span>
+					<span>Philadelphia, PA</span>
+				</div>
+			</div>
+		</footer>
 
+<script>
+  const toggle = document.getElementById('nav-toggle');
+  const links = document.getElementById('nav-links');
+  function closeMenu() { links.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-label', 'Open menu'); }
+  toggle.addEventListener('click', () => {
+    const open = links.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  links.addEventListener('click', event => { if (event.target.closest('a')) closeMenu(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && links.classList.contains('open')) { closeMenu(); toggle.focus(); } });
+  const desktop = window.matchMedia('(min-width: 721px)');
+  desktop.addEventListener('change', closeMenu);
+  function syncNav() { document.getElementById('site-nav').classList.toggle('scrolled', window.scrollY > 12); }
+  window.addEventListener('scroll', syncNav, { passive: true });
+  syncNav();
+  document.getElementById('year').textContent = new Date().getFullYear();
+</script>
 </body>
 </html>
