@@ -183,6 +183,20 @@ struct EditExportTests {
         #expect(viewRows.count == 4)
     }
 
+    /// When HHT_EXPORT_DIR is set (CI / `make export-check`), write a real export there so the Python
+    /// loader in analysis/ can be tested against the app's actual output format.
+    @Test func writeExportForPythonCheck() throws {
+        guard let dir = ProcessInfo.processInfo.environment["HHT_EXPORT_DIR"] else { return }
+        let (store, _) = try processed(chainDay())
+        let edit = EditService(store: store)
+        let v = try store.allVisits()
+        try edit.createPlace(forVisit: v[0].id, name: "Home", category: .home)
+        try edit.createPlace(forVisit: v[1].id, name: "Penn", category: .workSchool)
+        try edit.setTripMode(try store.allTrips()[0].id, .bicycle)
+        let folder = try Exporter(store: store).exportBundle(to: URL(fileURLWithPath: dir))
+        print("HHT export written to \(folder.path)")
+    }
+
     @Test func importTripsAndFlights() throws {
         let store = try TravelStore.inMemory()
         let imp = Importer(store: store)

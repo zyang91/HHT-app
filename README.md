@@ -23,6 +23,8 @@ project.yml             XcodeGen spec (HHT.xcodeproj is generated from it)
 
 ## Install on your iPhone (personal use, no App Store)
 
+**Reinstalling / renewing every 7 days → see [INSTALL.md](INSTALL.md)** (`make phone`).
+
 1. Open `HHT.xcodeproj` in Xcode.
 2. Select the **HHT** target › *Signing & Capabilities* › Team: your Apple ID (add it in Xcode › Settings › Accounts).
    If the bundle ID `com.zyang91.hht` is taken, change it to anything unique.
@@ -66,8 +68,19 @@ Or query `travel.sqlite` directly (`v_trips`, `v_visits` views) from R/DBI, Duck
 
 ## Development
 ```bash
-cd Packages/HHTCore && swift test
+make help          # list everything
+make test          # core test suite (29 tests incl. the brief's 14 scenarios)
+make sim           # build + run in the simulator with demo data
+make phone         # build, sign and install on the cable-connected iPhone (renews the 7-day signature)
+make ci            # what GitHub Actions runs: tests + app build + export→Python contract check
 ```
+CI (`.github/workflows/ci.yml`) runs on every push/PR on a macOS runner: Swift tests, an end-to-end check that the
+Python loader reads the app's real export (CSV and SQLite agree), a simulator build, a device build, and a check that
+`HHT.xcodeproj` matches `project.yml`.
+
+Why no Docker: iOS apps can only be built and signed on macOS with Xcode, which doesn't run in Linux containers.
+The reproducible "package" here is `project.yml` (XcodeGen) + `Makefile` + CI on macOS runners.
+
 The simulator build has a *Load demo data* button in Settings, and launching with `-hhtDemo YES` seeds three
 synthetic Philadelphia days. Neither exists in device builds.
 

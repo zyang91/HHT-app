@@ -8,3 +8,4 @@ analysis/data/
 analysis/.venv/
 __pycache__/
 *.sqlite
+.build-xcode/
