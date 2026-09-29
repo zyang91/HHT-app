@@ -275,3 +275,24 @@ let nyCalendar: Calendar = {
     c.timeZone = TimeZone(identifier: "America/New_York")!
     return c
 }()
+
+extension InferenceTests {
+    /// Long silent stay: a short walk-around mid-way must not end it at the last fix; the walk out does.
+    @Test func silentStayEndsWhenFinalWalkBegins() throws {
+        let start = Trajectory.date("2026-09-15 13:00")
+        var tr = Trajectory(start: start, at: Philly.penn)
+        tr.stay(minutes: 150)
+        tr.motion += [
+            MotionSample(timestamp: start.addingTimeInterval(80 * 60), activity: .walking, confidence: 2),
+            MotionSample(timestamp: start.addingTimeInterval(83 * 60), activity: .stationary, confidence: 2),
+            MotionSample(timestamp: start.addingTimeInterval(148 * 60), activity: .walking, confidence: 2),
+        ]
+        let now = start.addingTimeInterval(152 * 60)
+        let (_, visits, _) = try run(tr, now: now)
+        let end = try #require(visits.first?.departure)
+        #expect(minutes(end, start.addingTimeInterval(148 * 60)) < 1)
+        // still walking around mid-way → still there
+        let (_, early, _) = try run(tr, now: start.addingTimeInterval(84 * 60))
+        #expect(early.first?.departure == nil)
+    }
+}

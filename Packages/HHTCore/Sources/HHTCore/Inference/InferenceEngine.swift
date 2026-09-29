@@ -88,25 +88,47 @@ public final class InferenceEngine {
                 max(0, min(a1, b1).timeIntervalSince(max(a0, b0)))
             }
 
+            // an open locked visit only absorbs stays at its own place
+            func isNear(_ c: Coordinate, _ v: Visit) throws -> Bool {
+                let radius = try v.placeID.flatMap(store.place)?.radius ?? config.newPlaceRadius
+                return Geo.distance(c, v.coordinate) <= max(radius, config.stayRadius) + config.placeMatchSlack
+            }
+            func setDeparture(_ lv: inout Visit, _ e: Date) throws {
+                lv.departure = e
+                lv.updatedAt = Date()
+                try store.upsertVisit(lv)
+                // keep the copy in sync so later stays aren't absorbed into the now-closed visit
+                let id = lv.id
+                if let i = lockedVisits.firstIndex(where: { $0.id == id }) { lockedVisits[i] = lv }
+                try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
+            }
+
             // 1. resolve each detected stay to a visit (locked, reused auto, or new)
             var resolved: [Visit] = []
-            for stay in stays {
+            for (si, stay) in stays.enumerated() {
                 let sEnd = stay.end ?? now
                 let sDur = max(1, sEnd.timeIntervalSince(stay.start))
+                // showing up somewhere else ends an open locked visit ("still here" said later wins),
+                // at the last fix still near it
+                for var lv in lockedVisits where !lv.deleted && lv.departure == nil && lv.arrival < stay.start {
+                    guard try !isNear(stay.centroid, lv),
+                          try !(store.heldOpenAt(visitID: lv.id).map { $0 > stay.start } ?? false) else { continue }
+                    let lastNear = try clean.filter { $0.timestamp > lv.arrival && $0.timestamp < stay.start }
+                        .last { try isNear($0.coordinate, lv) }
+                    try setDeparture(&lv, lastNear?.timestamp ?? stay.start)
+                }
                 // user said this time was travel, or deleted this stop
                 if lockedTrips.contains(where: { !$0.deleted && overlap($0.departure, $0.arrival, stay.start, sEnd) > 0.5 * sDur })
                     || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0.5 * sDur }) {
                     continue
                 }
                 if var lv = lockedVisits.first(where: { !$0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {
-                    // don't re-close a visit the user explicitly marked "still here" after this stay ended
-                    if lv.departure == nil, let e = stay.end, try !(store.heldOpenAt(visitID: lv.id).map { $0 > e } ?? false) {
-                        lv.departure = e
-                        lv.updatedAt = Date()
-                        try store.upsertVisit(lv)
-                        // keep the copy in sync so later stays aren't absorbed into the now-closed visit
-                        if let i = lockedVisits.firstIndex(where: { $0.id == lv.id }) { lockedVisits[i] = lv }
-                        try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
+                    // close at the end of this stay unless the next stay is back at the same place (GPS split),
+                    // or the user marked "still here" after it ended
+                    if lv.departure == nil, let e = stay.end,
+                       try !(stays.indices.contains(si + 1) && isNear(stays[si + 1].centroid, lv)),
+                       try !(store.heldOpenAt(visitID: lv.id).map { $0 > e } ?? false) {
+                        try setDeparture(&lv, e)
                     }
                     if resolved.last?.id != lv.id { resolved.append(lv) } else { resolved[resolved.count - 1] = lv }
                     keptVisitIDs.insert(lv.id)
