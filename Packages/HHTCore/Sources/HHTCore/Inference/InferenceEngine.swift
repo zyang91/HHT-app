@@ -72,9 +72,15 @@ public final class InferenceEngine {
             let existingTrips = try store.trips(overlapping: from, to, includeDeleted: true, withSegments: false)
                 .filter { $0.departure >= from && $0.departure <= to }
             let lockedTrips = existingTrips.filter { $0.userStatus.isLocked }
-            let lockedVisitIDs = Set(lockedTrips.flatMap { [$0.originVisitID, $0.destinationVisitID].compactMap { $0 } })
+            // a locked trip pins its endpoint visits even when it departs before the window
+            // (e.g. a corrected trip into the visit the incremental run starts from)
+            var lockedVisitIDs = Set(lockedTrips.flatMap { [$0.originVisitID, $0.destinationVisitID].compactMap { $0 } })
+            for v in existingVisits where try store.tripsReferencing(visitID: v.id, includeDeleted: true)
+                .contains(where: { $0.userStatus.isLocked }) {
+                lockedVisitIDs.insert(v.id)
+            }
             func isLocked(_ v: Visit) -> Bool { v.userStatus.isLocked || lockedVisitIDs.contains(v.id) }
-            let lockedVisits = existingVisits.filter(isLocked)
+            var lockedVisits = existingVisits.filter(isLocked)
             var reusableAuto = existingVisits.filter { !isLocked($0) && !$0.deleted }
             var keptVisitIDs = Set<String>()
 
@@ -93,10 +99,13 @@ public final class InferenceEngine {
                     continue
                 }
                 if var lv = lockedVisits.first(where: { !$0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {
-                    if lv.departure == nil, let e = stay.end {
+                    // don't re-close a visit the user explicitly marked "still here" after this stay ended
+                    if lv.departure == nil, let e = stay.end, try !(store.heldOpenAt(visitID: lv.id).map { $0 > e } ?? false) {
                         lv.departure = e
                         lv.updatedAt = Date()
                         try store.upsertVisit(lv)
+                        // keep the copy in sync so later stays aren't absorbed into the now-closed visit
+                        if let i = lockedVisits.firstIndex(where: { $0.id == lv.id }) { lockedVisits[i] = lv }
                         try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
                     }
                     if resolved.last?.id != lv.id { resolved.append(lv) } else { resolved[resolved.count - 1] = lv }
