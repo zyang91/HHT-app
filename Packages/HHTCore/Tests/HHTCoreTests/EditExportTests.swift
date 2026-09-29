@@ -320,4 +320,30 @@ struct GeoAnalyticsTests {
         try engine.process(from: .distantPast, to: tr.t, now: tr.t.addingTimeInterval(60))
         #expect(try store.visit(grocery.id)?.departure == nil)
     }
+
+    /// A pinned, still-open visit must not swallow a later stay somewhere else.
+    @Test func openLockedVisitClosesWhenYouShowUpElsewhere() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 10)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        try edit.setTripMode(try #require(try store.allTrips().last).id, .subway)   // pins the open grocery visit
+        let grocery = try #require(try store.allVisits().last)
+        #expect(grocery.departure == nil)
+        let leave = tr.t
+        tr.move(to: Philly.penn, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        try store.insertPoints(tr.points.filter { $0.timestamp > (store.lastPoint()?.timestamp ?? .distantPast) })
+        try store.insertMotion(tr.motion.filter { $0.timestamp > leave })
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        let dep = try #require(try store.visit(grocery.id)?.departure)
+        #expect(abs(dep.timeIntervalSince(leave)) < 120)
+        let visits = try store.allVisits()
+        #expect(visits.count == 3)
+        #expect(Geo.distance(visits[2].coordinate, Philly.penn) < 100)
+        #expect(try store.allTrips().count == 2)
+    }
 }
+

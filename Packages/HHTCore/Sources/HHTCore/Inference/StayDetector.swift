@@ -42,6 +42,25 @@ public struct MotionTimeline: Sendable {
         return (s[.walking] ?? 0) + (s[.running] ?? 0) + (s[.cycling] ?? 0) + (s[.automotive] ?? 0)
     }
 
+    /// Start of the movement still going on at `to`, walking back over brief non-moving blips (≤ `tolerance`).
+    /// nil if the timeline isn't moving at `to`.
+    public func movementStart(from: Date, to: Date, tolerance: TimeInterval = 180) -> Date? {
+        var start: Date? = nil
+        var quiet: TimeInterval = 0
+        for i in samples.indices.reversed() where samples[i].timestamp < to && samples[i].confidence >= 1 {
+            let s = samples[i]
+            let end = min(i + 1 < samples.count ? samples[i + 1].timestamp : to, to)
+            if [.walking, .running, .cycling, .automotive].contains(s.activity) {
+                start = max(s.timestamp, from); quiet = 0
+            } else {
+                quiet += end.timeIntervalSince(max(s.timestamp, from))
+                if quiet > tolerance { break }
+            }
+            if s.timestamp <= from { break }
+        }
+        return start
+    }
+
     public func hasCoverage(from: Date, to: Date) -> Bool {
         seconds(from: from, to: to).values.reduce(0, +) > 0
     }
@@ -152,6 +171,9 @@ public struct StayDetector: Sendable {
                     let v = max(p.speed ?? 0, Self.plausibleTravelSpeed(distance: d))
                     let travel = min(d / v, gap)
                     estimatedEnd = max(last.timestamp, p.timestamp.addingTimeInterval(-travel))
+                } else if isGap, let m = motion.movementStart(from: last.timestamp, to: p.timestamp) {
+                    // moved around during a long silence: left when the movement that reached the next fix began
+                    estimatedEnd = m
                 }
                 brokeOnMove = true
                 break
@@ -176,10 +198,19 @@ public struct StayDetector: Sendable {
             var effectiveEnd = end!
             if !brokeOnMove && k >= n {
                 // cluster runs to the end of the data: ongoing if plausibly still there
-                if stationaryDuringGap(from: last.timestamp, to: now, lastPoint: last, motion: motion)
-                    || now.timeIntervalSince(last.timestamp) < config.gapThreshold {
+                let quiet = now.timeIntervalSince(last.timestamp) < config.gapThreshold
+                if quiet || stationaryDuringGap(from: last.timestamp, to: now, lastPoint: last, motion: motion) {
                     end = nil
                     effectiveEnd = max(now, last.timestamp)
+                } else if motion.hasCoverage(from: last.timestamp, to: now) {
+                    // judge by what we're doing now, not by every walk-around since the last fix
+                    if let m = motion.movementStart(from: last.timestamp, to: now),
+                       motion.movingSeconds(from: m, to: now) >= config.minSegmentDuration {
+                        end = m; effectiveEnd = m
+                    } else {
+                        end = nil
+                        effectiveEnd = max(now, last.timestamp)
+                    }
                 }
             }
             let duration = effectiveEnd.timeIntervalSince(first.timestamp)
