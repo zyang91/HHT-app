@@ -281,4 +281,43 @@ struct GeoAnalyticsTests {
         #expect(m.departuresByHour.reduce(0, +) == 4)
         #expect(m.topODPairs.count == 4)
     }
+
+    /// A corrected trip that departs before the incremental window still pins its destination visit:
+    /// dropping that auto visit used to hit the trips → visits foreign key.
+    @Test func lockedTripBeforeWindowPinsItsDestination() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        tr.move(to: Philly.penn, speed: 1.4, activity: .walking)
+        let (store, engine) = try processed(tr)
+        let grocery = try #require(try store.allVisits().last)
+        // an auto visit no detection supports, reached by a user-corrected trip that departs before it
+        let orphan = Visit(arrival: tr.t.addingTimeInterval(-300), departure: tr.t.addingTimeInterval(-120),
+                           coordinate: Philly.restaurant)
+        try store.upsertVisit(orphan)
+        let trip = Trip(originVisitID: grocery.id, destinationVisitID: orphan.id,
+                        departure: try #require(grocery.departure), arrival: orphan.arrival,
+                        distance: 1000, modeAuto: .walk, modeConfidence: 0.5, modeUser: .taxi, userStatus: .edited)
+        try store.upsertTrip(trip)
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        #expect(try store.visit(orphan.id) != nil)
+        #expect(try store.allTrips().first { $0.id == trip.id }?.mode == .taxi)
+    }
+
+    /// "Still here" is an override: reprocessing must not close the visit again at the old detected end.
+    @Test func stillHereSurvivesReprocessing() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.penn, speed: 1.4, activity: .walking)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        let grocery = try #require(try store.allVisits().first { Geo.distance($0.coordinate, Philly.grocery) < 100 })
+        #expect(grocery.departure != nil)
+        try edit.setVisitTimes(grocery.id, arrival: grocery.arrival, departure: nil)
+        try engine.process(from: .distantPast, to: tr.t, now: tr.t.addingTimeInterval(60))
+        #expect(try store.visit(grocery.id)?.departure == nil)
+    }
 }
