@@ -102,6 +102,14 @@ public final class InferenceEngine {
                 if let i = lockedVisits.firstIndex(where: { $0.id == id }) { lockedVisits[i] = lv }
                 try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
             }
+            // a stop deleted while still open covers the stay it was, not everything up to now
+            func deletedEnd(_ v: Visit) -> Date {
+                if let d = v.departure { return d }
+                guard let s = stays.first(where: {
+                    $0.start <= v.arrival.addingTimeInterval(config.minStayDuration) && ($0.end ?? now) > v.arrival
+                }) else { return v.arrival }
+                return s.end ?? now
+            }
 
             // 1. resolve each detected stay to a visit (locked, reused auto, or new)
             var resolved: [Visit] = []
@@ -119,7 +127,7 @@ public final class InferenceEngine {
                 }
                 // user said this time was travel, or deleted this stop
                 if lockedTrips.contains(where: { !$0.deleted && overlap($0.departure, $0.arrival, stay.start, sEnd) > 0.5 * sDur })
-                    || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0.5 * sDur }) {
+                    || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, deletedEnd($0), stay.start, sEnd) > 0.5 * sDur }) {
                     continue
                 }
                 if var lv = lockedVisits.first(where: { !$0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {

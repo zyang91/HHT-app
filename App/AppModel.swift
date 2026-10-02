@@ -71,26 +71,33 @@ final class AppModel: ObservableObject {
     }
 
     /// Sync motion history, then reconstruct visits/trips from new observations.
+    /// Triggers that arrive mid-run are coalesced into one more run instead of being dropped.
     func runInference() async {
-        guard !isProcessing else { return }
+        guard !isProcessing else { rerunRequested = true; return }
         isProcessing = true
         defer { isProcessing = false }
-        await motion.sync()
-        do {
-            try engine.processNew()
-        } catch {
-            errorMessage = "Inference failed: \(error)"
-        }
-        revision += 1
+        repeat {
+            rerunRequested = false
+            await motion.sync()
+            do {
+                try engine.processNew()
+            } catch {
+                errorMessage = "Inference failed: \(error)"
+            }
+            revision += 1
+        } while rerunRequested
     }
+
+    private var rerunRequested = false
 
     /// Reprocess a range from raw data (user edits are kept).
     func reprocess(from: Date, to: Date) async {
         isProcessing = true
-        defer { isProcessing = false }
         await motion.sync()
         do { try engine.process(from: from, to: to) } catch { errorMessage = "Reprocessing failed: \(error)" }
         revision += 1
+        isProcessing = false
+        if rerunRequested { await runInference() }
     }
 
     /// Run an edit; report errors; refresh views.

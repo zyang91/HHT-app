@@ -345,5 +345,32 @@ struct GeoAnalyticsTests {
         #expect(Geo.distance(visits[2].coordinate, Philly.penn) < 100)
         #expect(try store.allTrips().count == 2)
     }
+
+    /// Deleting a stop while it is still open must not suppress every later stay (Atlanta, Oct 1).
+    @Test func deletedOpenVisitDoesNotSwallowLaterStays() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 20)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        let grocery = try #require(try store.allVisits().last)
+        #expect(grocery.departure == nil)
+        try edit.deleteVisit(grocery.id)
+        let leave = tr.t
+        tr.move(to: Philly.penn, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        tr.move(to: Philly.restaurant, speed: 1.3, activity: .walking)
+        tr.stay(minutes: 30)
+        try store.insertPoints(tr.points.filter { $0.timestamp > (store.lastPoint()?.timestamp ?? .distantPast) })
+        try store.insertMotion(tr.motion.filter { $0.timestamp > leave })
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        let visits = try store.allVisits()
+        #expect(visits.count == 3)
+        #expect(!visits.contains { Geo.distance($0.coordinate, Philly.grocery) < 100 })
+        #expect(Geo.distance(visits[1].coordinate, Philly.penn) < 100)
+        #expect(Geo.distance(visits[2].coordinate, Philly.restaurant) < 100)
+        #expect(try store.visit(grocery.id)?.deleted == true)
+    }
 }
 
