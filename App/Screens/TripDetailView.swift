@@ -214,17 +214,25 @@ struct SplitTripSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let trip: Trip
-    @State private var start = Date()
-    @State private var end = Date()
+    // Seeded in init, not onAppear: the picker ranges below are built on first render and trap if inverted.
+    @State private var start: Date
+    @State private var end: Date
     @State private var placeID: String?
     @State private var places: [Place] = []
+
+    init(trip: Trip) {
+        self.trip = trip
+        let t = SplitTimes.trip(departure: trip.departure, arrival: trip.arrival)
+        _start = State(initialValue: t.stopStart)
+        _end = State(initialValue: t.stopEnd)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    DatePicker("Arrived at stop", selection: $start, in: trip.departure...trip.arrival, displayedComponents: [.hourAndMinute])
-                    DatePicker("Left stop", selection: $end, in: start...trip.arrival, displayedComponents: [.hourAndMinute])
+                    DatePicker("Arrived at stop", selection: $start, in: .ordered(trip.departure, trip.arrival), displayedComponents: [.hourAndMinute])
+                    DatePicker("Left stop", selection: $end, in: .ordered(start, trip.arrival), displayedComponents: [.hourAndMinute])
                 } footer: { Text("The trip becomes two trips with a visit in between.") }
                 Section("Where") {
                     Picker("Place", selection: $placeID) {
@@ -239,15 +247,14 @@ struct SplitTripSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Split") {
-                        model.perform { _ = try model.edit.splitTrip(trip.id, stopStart: start, stopEnd: max(end, start.addingTimeInterval(60)), placeID: placeID) }
+                        let stop = SplitTimes.tripStop(start: start, end: end, arrival: trip.arrival)
+                        model.perform { _ = try model.edit.splitTrip(trip.id, stopStart: stop.stopStart, stopEnd: stop.stopEnd, placeID: placeID) }
                         dismiss()
                     }
                 }
             }
+            .onChange(of: start) { _, v in end = max(end, v) }
             .onAppear {
-                let mid = trip.departure.addingTimeInterval(trip.duration / 2)
-                start = mid
-                end = min(trip.arrival.addingTimeInterval(-30), mid.addingTimeInterval(300))
                 places = ((try? model.store.places()) ?? []).filter(\.isNamed)
             }
         }
