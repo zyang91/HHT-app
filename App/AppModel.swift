@@ -66,38 +66,101 @@ final class AppModel: ObservableObject {
             try? DemoData.generate(into: store)
         }
         #endif
+        refreshInferenceStatus()
         Task { await runInference() }
         autoBackupIfDue()
     }
 
+    // MARK: - Inference
+
+    /// What a run is doing right now; `syncingMotion` happens before the engine starts.
+    enum InferencePhase: Equatable {
+        case syncingMotion
+        case engine(InferenceEngine.Phase)
+    }
+
+    struct InferenceFailure: Equatable {
+        var message: String
+        var at: Date
+    }
+
+    @Published private(set) var phase: InferencePhase?
+    @Published private(set) var progress: InferenceEngine.Progress?
+    @Published private(set) var runStartedAt: Date?
+    /// Another trigger arrived mid-run; it will run once the current one commits.
+    @Published private(set) var rerunRequested = false
+    /// The last run failed (its transaction rolled back); cleared by the next successful run.
+    @Published private(set) var inferenceFailure: InferenceFailure?
+    @Published private(set) var lastInferenceAt: Date?
+    /// Raw data newer than the diary's last stop that no run has resolved yet.
+    @Published private(set) var pendingTail: InferenceEngine.UnresolvedTail?
+
     /// Sync motion history, then reconstruct visits/trips from new observations.
     /// Triggers that arrive mid-run are coalesced into one more run instead of being dropped.
     func runInference() async {
-        guard !isProcessing else { rerunRequested = true; return }
-        isProcessing = true
-        defer { isProcessing = false }
-        repeat {
-            rerunRequested = false
-            await motion.sync()
-            do {
-                try engine.processNew()
-            } catch {
-                errorMessage = "Inference failed: \(error)"
+        rerunRequested = true
+        guard !isProcessing else { return }
+        await withRun {
+            while rerunRequested {
+                rerunRequested = false
+                if let r = queuedRange {
+                    queuedRange = nil
+                    await runEngine { try $0.process(from: r.from, to: r.to) }
+                } else {
+                    await runEngine { try $0.processNew() }
+                }
             }
-            revision += 1
-        } while rerunRequested
+        }
     }
 
-    private var rerunRequested = false
-
-    /// Reprocess a range from raw data (user edits are kept).
+    /// Reprocess a range from raw data (user edits are kept). Queued behind a run already in progress.
     func reprocess(from: Date, to: Date) async {
+        queuedRange = queuedRange.map { (min($0.from, from), max($0.to, to)) } ?? (from, to)
+        await runInference()
+    }
+
+    private var queuedRange: (from: Date, to: Date)?
+
+    /// Re-check how much raw data is waiting to be resolved (cheap; safe to call often).
+    func refreshInferenceStatus() {
+        lastInferenceAt = engine.lastRunAt
+        pendingTail = try? engine.unresolvedTail()
+    }
+
+    private func withRun(_ body: () async -> Void) async {
         isProcessing = true
+        runStartedAt = Date()
+        defer {
+            isProcessing = false
+            runStartedAt = nil
+            phase = nil
+            progress = nil
+            refreshInferenceStatus()
+        }
+        await body()
+    }
+
+    /// Motion sync, then the engine on a background thread so the diary stays usable while it runs.
+    private func runEngine(_ work: @escaping (InferenceEngine) throws -> InferenceEngine.Report) async {
+        phase = .syncingMotion
+        progress = nil
         await motion.sync()
-        do { try engine.process(from: from, to: to) } catch { errorMessage = "Reprocessing failed: \(error)" }
+        let engine = self.engine
+        engine.onProgress = { p in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isProcessing else { return }
+                self.progress = p
+                self.phase = .engine(p.phase)
+            }
+        }
+        defer { engine.onProgress = nil }
+        do {
+            _ = try await Task.detached(priority: .utility) { try work(engine) }.value
+            inferenceFailure = nil
+        } catch {
+            inferenceFailure = InferenceFailure(message: "\(error)", at: Date())
+        }
         revision += 1
-        isProcessing = false
-        if rerunRequested { await runInference() }
     }
 
     /// Run an edit; report errors; refresh views.

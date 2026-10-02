@@ -56,8 +56,18 @@ struct DayView: View {
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
+    /// Raw data past the last stop that falls on this day.
+    private var pendingTail: InferenceEngine.UnresolvedTail? {
+        guard let t = model.pendingTail else { return nil }
+        let r = DateRange.day(day)
+        return t.since < r.end && t.lastPoint >= r.start ? t : nil
+    }
+
     var body: some View {
         List {
+            if model.isProcessing || model.inferenceFailure != nil {
+                Section { InferenceStatusBanner() }
+            }
             if !fixedDay && reviewCount > 0 {
                 Section {
                     NavigationLink { ReviewView() } label: {
@@ -71,7 +81,7 @@ struct DayView: View {
                 summary
             }
             Section {
-                if data.items.isEmpty {
+                if data.items.isEmpty && pendingTail == nil {
                     emptyState
                 } else {
                     ForEach(data.items) { item in
@@ -87,7 +97,10 @@ struct DayView: View {
                             .onTapGesture { selectedTrip = IDBox(id: t.id) }
                         }
                     }
+                    if let tail = pendingTail { PendingActivityRow(tail: tail) }
                 }
+            } footer: {
+                if isToday { LastInferenceLabel(date: model.lastInferenceAt) }
             }
         }
         .groupedList()
@@ -119,6 +132,13 @@ struct DayView: View {
             .presentationDetents([.medium])
         }
         .task(id: "\(model.revision)-\(day.timeIntervalSince1970)") { reload() }
+        .task(id: isToday) {
+            // new fixes arrive without a revision bump; keep the pending tail current while today is on screen
+            while isToday && !Task.isCancelled {
+                if !model.isProcessing { model.refreshInferenceStatus() }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 
     private var summary: some View {
@@ -306,5 +326,127 @@ struct DayMap: View {
         let span = MKCoordinateSpan(latitudeDelta: max(0.01, (maxLat - minLat) * 1.3),
                                     longitudeDelta: max(0.012, (maxLon - minLon) * 1.3))
         return .region(MKCoordinateRegion(center: center, span: span))
+    }
+}
+
+// MARK: - Inference status
+
+/// Shown while the diary is being rebuilt from raw data, or when the last rebuild failed.
+/// Nothing at all when inference is idle and healthy.
+struct InferenceStatusBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if model.isProcessing {
+            running
+        } else if let f = model.inferenceFailure {
+            failed(f)
+        }
+    }
+
+    private var running: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ProgressView().frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Updating your diary…").font(.subheadline.weight(.semibold))
+                Text(phaseText).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                if let p = model.progress, p.phase == .resolvingVisits, p.staysTotal > 1 {
+                    ProgressView(value: Double(p.staysResolved), total: Double(p.staysTotal))
+                }
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    Text(detailText(now: ctx.date)).font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func failed(_ f: AppModel.InferenceFailure) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Couldn't update your diary", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+            Text("Your recorded data is safe; the diary just hasn't caught up with it. \(f.at, format: .relative(presentation: .named)).")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(f.message).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
+            Button { Task { await model.runInference() } } label: { Label("Try again", systemImage: "arrow.clockwise") }
+                .buttonStyle(.bordered).controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var phaseText: String {
+        let points = model.progress.map { " · \($0.report.pointsConsidered.formatted()) points" } ?? ""
+        switch model.phase {
+        case .syncingMotion, nil: return "Syncing motion activity"
+        case .engine(.loadingPoints): return "Loading location points"
+        case .engine(.detectingStays): return "Detecting stays" + points
+        case .engine(.resolvingVisits):
+            let p = model.progress
+            return "Matching visits" + (p.map { $0.staysTotal > 0 ? " (\($0.staysResolved) of \($0.staysTotal))" : "" } ?? "") + points
+        case .engine(.buildingTrips): return "Building trips" + points
+        case .engine(.finalizing): return "Saving"
+        }
+    }
+
+    private func detailText(now: Date) -> String {
+        var parts: [String] = []
+        if let r = model.progress?.report {
+            let visits = r.visitsCreated + r.visitsUpdated
+            if visits > 0 { parts.append("\(visits) visit\(visits == 1 ? "" : "s") so far") }
+            if r.tripsCreated > 0 { parts.append("\(r.tripsCreated) trip\(r.tripsCreated == 1 ? "" : "s")") }
+        }
+        if let s = model.runStartedAt {
+            let e = Int(max(0, now.timeIntervalSince(s)))
+            parts.append(String(format: "%d:%02d elapsed", e / 60, e % 60))
+        }
+        if model.rerunRequested { parts.append("another update queued") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// The end of the timeline when raw data exists past the last stop that no run has turned into a visit or trip yet.
+struct PendingActivityRow: View {
+    @EnvironmentObject var model: AppModel
+    let tail: InferenceEngine.UnresolvedTail
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: model.isProcessing ? "hourglass" : "ellipsis")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 28)
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3])))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not in your diary yet").font(.subheadline.weight(.medium))
+                Text("Since \(Fmt.time(tail.since)) · \(tail.pointCount.formatted()) points · last fix \(Fmt.time(tail.lastPoint))")
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                Text(model.isProcessing ? "Being processed now…"
+                     : "Recorded, not lost. It becomes a trip once you've stopped somewhere for ~5 minutes.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+            if !model.isProcessing {
+                Button("Update") { Task { await model.runInference() } }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// "Diary updated 5 minutes ago", ticking.
+struct LastInferenceLabel: View {
+    let date: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            if let d = date {
+                Text("Diary updated \(d, format: .relative(presentation: .named))")
+            } else {
+                Text("Diary not built yet")
+            }
+        }
+        .font(.caption2).foregroundStyle(.secondary)
     }
 }

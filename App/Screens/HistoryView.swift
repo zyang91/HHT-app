@@ -19,6 +19,9 @@ struct HistoryView: View {
 
     var body: some View {
         List {
+            if model.isProcessing || model.inferenceFailure != nil {
+                Section { InferenceStatusBanner() }
+            }
             Section {
                 NavigationLink { TripSearchView() } label: { Label("Find trips…", systemImage: "line.3.horizontal.decrease.circle") }
                 NavigationLink { FlightsView() } label: {
