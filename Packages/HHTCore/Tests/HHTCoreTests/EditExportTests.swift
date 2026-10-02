@@ -112,6 +112,46 @@ struct EditExportTests {
         #expect(all.contains { $0.destinationVisitID == stop.id } && all.contains { $0.originVisitID == stop.id })
     }
 
+    // Issue #11: the split sheets crashed on open because their picker ranges were built from `Date()` defaults
+    // (now…a past departure). The defaults must be ordered and strictly inside the record for any record length.
+    @Test(arguments: [0.5, 5, 90, 3 * 3600] as [TimeInterval])
+    func splitDefaultsAreOrderedInsideTheRecord(span: TimeInterval) {
+        let a = Trajectory.date("2026-09-15 07:00"), d = a.addingTimeInterval(span)
+        for (dep, now) in [(Optional(d), Date()), (nil, d)] {   // past visit; still-open visit
+            let v = SplitTimes.visit(arrival: a, departure: dep, now: now)
+            #expect(a < v.leave && v.leave < v.back && v.back < d)
+            #expect(v.leave <= v.stopArrival && v.stopArrival <= v.stopDeparture && v.stopDeparture <= v.back)
+        }
+        let t = SplitTimes.trip(departure: a, arrival: d)
+        #expect(a < t.stopStart && t.stopStart <= t.stopEnd && t.stopEnd < d)
+        let picked = SplitTimes.tripStop(start: t.stopStart, end: t.stopStart, arrival: d)
+        #expect(picked.stopStart <= picked.stopEnd && picked.stopEnd < d)
+        #expect(ClosedRange<Date>.ordered(d, a) == d...d)
+    }
+
+    @Test func splitDefaultsAreAcceptedByEditService() throws {
+        let (store, _) = try processed(chainDay())
+        let edit = EditService(store: store)
+        let lunch = try edit.createPlace(forVisit: try store.allVisits()[2].id, name: "Lunch", category: nil)
+
+        // "I left and came back", via a stop, on an inferred visit
+        let penn = try store.allVisits()[1]
+        let v = SplitTimes.visit(arrival: penn.arrival, departure: penn.departure)
+        let created = try edit.splitVisit(penn.id, leave: v.leave, back: v.back,
+                                          stop: (lunch.id, v.stopArrival, v.stopDeparture), mode: .walk)
+        #expect(created.count == 2)
+
+        // "I stopped somewhere" on a user-edited (locked) trip, with the picker's zero-length stop padded
+        var trip = try store.allTrips()[0]
+        try edit.setTripMode(trip.id, .bicycle)
+        trip = try #require(try store.trip(trip.id))
+        let t = SplitTimes.trip(departure: trip.departure, arrival: trip.arrival)
+        let s = SplitTimes.tripStop(start: t.stopStart, end: t.stopStart, arrival: trip.arrival)
+        let stop = try edit.splitTrip(trip.id, stopStart: s.stopStart, stopEnd: s.stopEnd)
+        let halves = try store.allTrips().filter { $0.destinationVisitID == stop.id || $0.originVisitID == stop.id }
+        #expect(halves.count == 2 && halves.allSatisfy { $0.mode == .bicycle && $0.departure < $0.arrival })
+    }
+
     @Test func correctionsPersistAcrossRestart() throws {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("hht-\(UUID().uuidString).sqlite").path
         defer { try? FileManager.default.removeItem(atPath: path) }
