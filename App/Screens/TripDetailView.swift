@@ -218,6 +218,7 @@ struct SplitTripSheet: View {
     @State private var start: Date
     @State private var end: Date
     @State private var placeID: String?
+    @State private var pin: Coordinate?
     @State private var places: [Place] = []
 
     init(trip: Trip) {
@@ -234,11 +235,14 @@ struct SplitTripSheet: View {
                     DatePicker("Arrived at stop", selection: $start, in: .ordered(trip.departure, trip.arrival), displayedComponents: [.hourAndMinute])
                     DatePicker("Left stop", selection: $end, in: .ordered(start, trip.arrival), displayedComponents: [.hourAndMinute])
                 } footer: { Text("The trip becomes two trips with a visit in between.") }
-                Section("Where") {
+                Section {
+                    stopMap.frame(height: 260).listRowInsets(EdgeInsets())
                     Picker("Place", selection: $placeID) {
-                        Text("Location on route (new place)").tag(String?.none)
+                        Text(pin == nil ? "Guess from GPS (new place)" : "Pin on map (new place)").tag(String?.none)
                         ForEach(places) { p in Text(p.displayName).tag(String?.some(p.id)) }
                     }
+                } header: { Text("Where") } footer: {
+                    Text("Tap the map where you stopped. Without a pin the stop goes where GPS last saw you, which can be far off if the trip has a GPS gap.")
                 }
             }
             .navigationTitle("Add stop")
@@ -248,14 +252,34 @@ struct SplitTripSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Split") {
                         let stop = SplitTimes.tripStop(start: start, end: end, arrival: trip.arrival)
-                        model.perform { _ = try model.edit.splitTrip(trip.id, stopStart: stop.stopStart, stopEnd: stop.stopEnd, placeID: placeID) }
+                        model.perform { _ = try model.edit.splitTrip(trip.id, stopStart: stop.stopStart, stopEnd: stop.stopEnd,
+                                                                       placeID: placeID, at: pin) }
                         dismiss()
                     }
                 }
             }
             .onChange(of: start) { _, v in end = max(end, v) }
+            // Choosing a saved place moves the pin there; tapping the map (below) goes back to a new place.
+            .onChange(of: placeID) { _, id in
+                if let p = places.first(where: { $0.id == id }) { pin = p.coordinate }
+            }
             .onAppear {
                 places = ((try? model.store.places()) ?? []).filter(\.isNamed)
+            }
+        }
+    }
+
+    private var stopMap: some View {
+        MapReader { proxy in
+            Map(initialPosition: .automatic) {
+                MapPolyline(coordinates: trip.route.map(\.cl)).stroke(trip.mode.color, lineWidth: 4)
+                if let p = pin { Marker("Stop", systemImage: "mappin", coordinate: p.cl).tint(.orange) }
+            }
+            .mapStyle(.standard(pointsOfInterest: .including([.publicTransport, .store, .restaurant, .cafe])))
+            .onTapGesture { point in
+                guard let c = proxy.convert(point, from: .local) else { return }
+                pin = Coordinate(c.latitude, c.longitude)
+                placeID = nil
             }
         }
     }
