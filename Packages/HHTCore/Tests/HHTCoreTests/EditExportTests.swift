@@ -152,6 +152,18 @@ struct EditExportTests {
         #expect(halves.count == 2 && halves.allSatisfy { $0.mode == .bicycle && $0.departure < $0.arrival })
     }
 
+    @Test func splitTripAtMapPin() throws {
+        let (store, _) = try processed(chainDay())
+        let edit = EditService(store: store)
+        let trip = try store.allTrips()[0]   // home → penn
+        let mid = trip.departure.addingTimeInterval(trip.duration / 2)
+        // A pin far from where GPS was at `mid` must win over the GPS guess.
+        let stop = try edit.splitTrip(trip.id, stopStart: mid, stopEnd: mid.addingTimeInterval(300), at: Philly.restaurant)
+        #expect(Geo.distance(stop.coordinate, Philly.restaurant) < 1)
+        let place = try #require(try store.place(stop.placeID!))
+        #expect(Geo.distance(place.coordinate, Philly.restaurant) < 50)
+    }
+
     @Test func correctionsPersistAcrossRestart() throws {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("hht-\(UUID().uuidString).sqlite").path
         defer { try? FileManager.default.removeItem(atPath: path) }
