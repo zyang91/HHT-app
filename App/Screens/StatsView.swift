@@ -95,15 +95,27 @@ struct StatsView: View {
             }
             .pickerStyle(.segmented)
             let total = m.modeShare.reduce(0.0) { $0 + value($1) }
-            Chart(m.modeShare) { r in
-                BarMark(x: .value("Share", total > 0 ? value(r) / total : 0), y: .value("Mode", r.mode.label))
-                    .foregroundStyle(r.mode.color)
-                    .annotation(position: .trailing) {
-                        Text(Fmt.percent(total > 0 ? value(r) / total : 0)).font(.caption2).foregroundStyle(.secondary)
+            // one row per mode (label + share above its bar) so rows never collide, whatever the text size
+            VStack(spacing: 10) {
+                ForEach(m.modeShare) { r in
+                    let share = total > 0 ? value(r) / total : 0
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(r.mode.label).font(.subheadline).lineLimit(1)
+                            Spacer()
+                            Text(Fmt.percent(share)).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        Capsule().fill(Color.secondary.opacity(0.15)).frame(height: 8)
+                            .overlay(alignment: .leading) {
+                                GeometryReader { g in
+                                    Capsule().fill(r.mode.color).frame(width: max(share > 0 ? 8 : 0, g.size.width * share))
+                                }
+                            }
                     }
+                    .accessibilityElement(children: .combine)
+                }
             }
-            .chartXAxis(.hidden)
-            .frame(height: CGFloat(max(60, m.modeShare.count * 28)))
+            .padding(.vertical, 6)
             ForEach(ModeGroup.allCases, id: \.self) { g in
                 if (m.groupShareByTrips[g] ?? 0) > 0 || (c?.groupShareByTrips[g] ?? 0) > 0 {
                     row("\(g.label) share (trips)", Fmt.percent(m.groupShareByTrips[g] ?? 0), c.map { Fmt.percent($0.groupShareByTrips[g] ?? 0) })
