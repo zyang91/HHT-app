@@ -1,4 +1,35 @@
-# HHT — personal travel diary
+<p align="center">
+  <img src="docs/assets/hht-logo.png" width="112" height="112" alt="HHT logo: a route joining four stops on a dark map grid">
+</p>
+
+<h1 align="center">HHT — personal travel diary</h1>
+
+<p align="center">
+  <em>A household travel survey for one person, rebuilt from your phone's location every day.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zyang91/HHT-app/actions/workflows/ci.yml"><img src="https://github.com/zyang91/HHT-app/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/iOS-17%2B-0f1f3a?logo=apple&logoColor=white" alt="iOS 17+">
+  <img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white" alt="Swift / SwiftUI">
+  <img src="https://img.shields.io/badge/data-local--first-5ac8a0" alt="Local-first data">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 license"></a>
+  <a href="https://zhanchaoyang.com/HHT-app/"><img src="https://img.shields.io/badge/docs-website-f4a93b" alt="Docs website"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/hht-daily-journey.png" width="820" alt="A miniature Philadelphia unfolds from a phone, with a looping route connecting home, campus, coffee, cycling and the subway.">
+</p>
+
+<p align="center">
+  <a href="#install-on-your-iphone-personal-use-no-app-store">Install</a> ·
+  <a href="#daily-use">Daily use</a> ·
+  <a href="#research-workflow">Research workflow</a> ·
+  <a href="#development">Development</a> ·
+  <a href="https://zhanchaoyang.com/HHT-app/">Docs</a>
+</p>
+
+---
 
 A private, local-first iOS app that works like a continuous **household travel survey for one person**.
 It records location in the background, rebuilds each day into **visits, trips, modes and trip chains**, lets you fix
@@ -87,3 +118,9 @@ synthetic Philadelphia days. Neither exists in device builds.
 Design priorities follow the brief: data integrity → collection reliability → correct reconstruction → fast correction →
 exportability → analytics → polish. Raw observations are never modified; inference can be re-run at any time without
 touching anything you corrected.
+
+---
+
+<p align="center">
+  <img src="docs/assets/qingdao-footer.png" width="720" alt="Line drawing of the Qingdao waterfront: Zhanqiao Pier and its pavilion, the twin-spired cathedral, a lighthouse and a sailboat.">
+</p>
