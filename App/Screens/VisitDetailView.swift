@@ -24,6 +24,7 @@ struct VisitDetailView: View {
             Group {
                 if let v = visit { content(v) } else { ProgressView() }
             }
+            .toonBackground()
             .navigationTitle("Visit")
             .inlineTitle()
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { saveNotes(); dismiss() } } }

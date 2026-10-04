@@ -66,49 +66,55 @@ struct ExploreMapView: View {
     @State private var showHull = true
     @State private var showFlights = true
     @State private var position: MapCameraPosition = .automatic
+    @Environment(\.tabBarSpace) private var tabBarSpace
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Map(position: $position) {
                 if showHull, let hull = metrics?.activitySpaceHull, hull.count >= 3 {
-                    MapPolygon(coordinates: hull.map(\.cl)).foregroundStyle(.blue.opacity(0.08)).stroke(.blue.opacity(0.6), lineWidth: 1)
+                    MapPolygon(coordinates: hull.map(\.cl)).foregroundStyle(Toon.accent.opacity(0.12))
+                        .stroke(Toon.ink, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round, dash: [8, 6]))
                 }
                 if showRoutes {
                     ForEach(trips) { t in
                         if t.mode != .airplane, t.route.count >= 2 {
-                            MapPolyline(coordinates: t.route.map(\.cl)).stroke(t.mode.color.opacity(0.55), lineWidth: 3)
+                            MapPolyline(coordinates: t.route.map(\.cl)).stroke(Toon.ink.opacity(0.7), lineWidth: 6)
+                            MapPolyline(coordinates: t.route.map(\.cl)).stroke(t.mode.color, lineWidth: 3.5)
                         }
                     }
                 }
                 if showFlights {
                     ForEach(flights) { f in
                         if let o = f.origin, let d = f.destination {
-                            MapPolyline(MKGeodesicPolyline(coordinates: [o.cl, d.cl], count: 2)).stroke(.purple.opacity(0.7), lineWidth: 2)
+                            MapPolyline(MKGeodesicPolyline(coordinates: [o.cl, d.cl], count: 2)).stroke(Toon.ink, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 6]))
                         }
                     }
                 }
                 if showPlaces {
                     ForEach(placeUse, id: \.0.id) { p, n in
                         Annotation(p.isNamed ? p.displayName : "", coordinate: p.coordinate.cl) {
-                            Circle().fill(Color.orange.opacity(0.8))
-                                .frame(width: CGFloat(8 + min(24, sqrt(Double(n)) * 3)), height: CGFloat(8 + min(24, sqrt(Double(n)) * 3)))
-                                .overlay(Circle().stroke(.white, lineWidth: 1))
+                            Circle().fill(p.toonColor == Toon.paper ? Toon.accent : p.toonColor)
+                                .frame(width: CGFloat(10 + min(24, sqrt(Double(n)) * 3)), height: CGFloat(10 + min(24, sqrt(Double(n)) * 3)))
+                                .overlay(Circle().strokeBorder(Toon.ink, lineWidth: 2))
                         }
                     }
                 }
             }
             .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+            // keep the Apple Maps logo / Legal link clear of the stats card and tab bar
+            .safeAreaPadding(.bottom, tabBarSpace + (metrics == nil ? 0 : 92))
 
             if let m = metrics {
-                HStack {
+                HStack(alignment: .center, spacing: 6) {
+                    Mascot(size: 34, bob: false)
                     StatPill(value: Fmt.distance(m.radiusOfGyrationDwell ?? 0), label: "radius of gyration")
                     StatPill(value: String(format: "%.1f km²", (m.activitySpaceHullArea ?? 0) / 1e6), label: "hull area")
                     StatPill(value: "\(m.uniquePlaces)", label: "places")
                     StatPill(value: "\(m.trips)", label: "trips")
                 }
                 .padding(10)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .padding()
+                .toonCard(radius: 20, shadow: 4)
+                .padding(.horizontal, 16).padding(.bottom, 16 + tabBarSpace)
             }
         }
         .navigationTitle("Map")

@@ -58,38 +58,45 @@ struct DayView: View {
 
     var body: some View {
         List {
-            if !fixedDay && reviewCount > 0 {
-                Section {
-                    NavigationLink { ReviewView() } label: {
-                        Label("\(reviewCount) trip\(reviewCount == 1 ? "" : "s") in the last 7 days could use a quick check",
-                              systemImage: "checklist")
-                    }
-                }
-            }
             Section {
-                DayMap(data: data).frame(height: 230).listRowInsets(EdgeInsets())
-                summary
+                MascotSays(text: mascotLine).toonRow(top: 8, bottom: 8)
+                if !fixedDay && reviewCount > 0 {
+                    reviewBanner
+                        .background(NavigationLink { ReviewView() } label: { EmptyView() }.opacity(0))
+                        .toonRow()
+                }
+                DayMap(data: data)
+                    .frame(height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .toonCard(radius: 22, shadow: 5)
+                    .toonRow(top: 8, bottom: 10)
+                summary.toonRow(top: 8, bottom: 8)
             }
             Section {
                 if data.items.isEmpty {
-                    emptyState
+                    emptyState.toonRow()
                 } else {
                     ForEach(data.items) { item in
                         switch item {
                         case .visit(let v, let p):
                             VisitRow(visit: v, place: p, day: day).contentShape(Rectangle())
                                 .onTapGesture { selectedVisit = IDBox(id: v.id) }
+                                .toonRow(top: 5, bottom: 5)
                         case .trip(let t):
                             TripRow(trip: t, quickModes: quickModes, day: day) { mode in
                                 model.perform { try model.edit.setTripMode(t.id, mode) }
                             }
                             .contentShape(Rectangle())
                             .onTapGesture { selectedTrip = IDBox(id: t.id) }
+                            .toonRow(top: 3, bottom: 3)
                         }
                     }
                 }
+            } header: {
+                if !data.items.isEmpty { SectionLabel(text: "Your day, step by step") }
             }
         }
+        .listSectionSpacing(.compact)
         .groupedList()
         .navigationTitle(isToday && !fixedDay ? "Today" : Fmt.shortDay(day))
         .inlineTitle()
@@ -124,26 +131,72 @@ struct DayView: View {
     private var summary: some View {
         let dist = data.trips.reduce(0) { $0 + $1.distance }
         let time = data.trips.reduce(0) { $0 + $1.duration }
-        return HStack {
-            StatPill(value: "\(data.trips.count)", label: "trips")
-            StatPill(value: Fmt.distance(dist), label: "distance")
-            StatPill(value: Fmt.duration(time), label: "travelling")
-            StatPill(value: "\(Set(data.visits.compactMap(\.placeID)).count)", label: "places")
+        return Grid(horizontalSpacing: 14, verticalSpacing: 14) {
+            GridRow {
+                StatSticker(value: "\(data.trips.count)", label: "trips", color: Toon.sun, tilt: -2)
+                StatSticker(value: Fmt.distance(dist), label: "distance", color: Toon.lime, tilt: 1.5)
+            }
+            GridRow {
+                StatSticker(value: Fmt.duration(time), label: "travelling", color: Toon.sky, tilt: 1)
+                StatSticker(value: "\(Set(data.visits.compactMap(\.placeID)).count)", label: "places", color: Toon.bubblegum, tilt: -1.5)
+            }
         }
         .padding(.vertical, 4)
     }
 
-    @ViewBuilder private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Nothing recorded for this day yet.").font(.subheadline)
-            if model.collector.mode == .off {
-                Text("Location collection is off. Turn it on in Settings.").font(.caption).foregroundStyle(.secondary)
-            } else if isToday {
-                Text("Visits appear after you've stayed somewhere ~5 minutes; trips once you arrive. Pull to refresh.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    private var reviewBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checklist")
+                .font(.system(size: 18, weight: .bold)).foregroundStyle(Toon.ink)
+                .frame(width: 38, height: 38)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Toon.accent))
+            Text("\(reviewCount) trip\(reviewCount == 1 ? "" : "s") in the last 7 days could use a quick check")
+                .font(.toon(14, .heavy)).foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Image(systemName: "arrow.right").font(.system(size: 16, weight: .heavy)).foregroundStyle(.white)
         }
-        .padding(.vertical, 6)
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Toon.ink))
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Toon.accent).offset(x: 4, y: 4))
+    }
+
+    /// What Pip says above the map.
+    private var mascotLine: String {
+        guard !data.trips.isEmpty else {
+            return isToday && !fixedDay ? "No trips yet today. I'm keeping an eye out!" : "A quiet day. Nothing recorded here."
+        }
+        let dist = Fmt.distance(data.trips.reduce(0) { $0 + $1.distance })
+        let n = data.trips.count
+        let lead = "\(n) trip\(n == 1 ? "" : "s") and \(dist)\(isToday && !fixedDay ? " so far" : "")."
+        var byGroup: [ModeGroup: Double] = [:]
+        for t in data.trips { byGroup[t.mode.group, default: 0] += t.duration }
+        switch byGroup.max(by: { $0.value < $1.value })?.key {
+        case .active: return lead + " Your feet did most of the work!"
+        case .transit: return lead + " Transit pro, nice."
+        case .car: return lead + " Mostly on wheels today."
+        case .longDistance: return lead + " Big journey day!"
+        default: return lead
+        }
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ToonChip(symbol: "moon.zzz", color: Toon.grape, size: 44)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Nothing recorded for this day yet.").font(.toon(16, .heavy))
+                if model.collector.mode == .off {
+                    Text("Location collection is off. Turn it on in Settings.").font(.toon(13, .bold)).foregroundStyle(Toon.muted)
+                } else if isToday {
+                    Text("Visits appear after you've stayed somewhere ~5 minutes; trips once you arrive. Pull to refresh.")
+                        .font(.toon(13, .bold)).foregroundStyle(Toon.muted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Toon.ink)
+        .padding(14)
+        .toonCard(radius: 20)
     }
 
     private func shift(_ days: Int) {
@@ -169,18 +222,16 @@ struct VisitRow: View {
     let day: Date
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: place?.category?.symbol ?? "mappin")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(place?.isNamed == true ? Color.accentColor : .secondary)
-                .frame(width: 28, height: 28)
-                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+        HStack(alignment: .center, spacing: 12) {
+            ToonChip(symbol: place?.category?.symbol ?? "mappin", color: place?.toonColor ?? Toon.stone, size: 44)
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(place?.isNamed == true ? place!.displayName : (place?.address ?? "Unnamed place"))
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(place?.isNamed == true ? .primary : .secondary)
-                    if visit.userStatus.isLocked { Image(systemName: "checkmark.seal").font(.caption).foregroundStyle(.secondary) }
+                        .font(.toon(18, .bold))
+                        .foregroundStyle(place?.isNamed == true ? Toon.ink : Toon.muted)
+                        .lineLimit(2)
+                    if visit.userStatus.isLocked { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(Toon.okGreen) }
+                    if visit.departure == nil { ToonBadge(text: "here now", color: Toon.accent) }
                 }
                 HStack(spacing: 6) {
                     Text(timeSpan).monospacedDigit()
@@ -188,11 +239,13 @@ struct VisitRow: View {
                     Text(visit.departure == nil ? "now · \(Fmt.duration(visit.duration()))" : Fmt.duration(visit.duration()))
                     if let p = visit.purpose ?? place?.category?.defaultPurpose { Text("· \(p.label)") }
                 }
-                .font(.caption).foregroundStyle(.secondary)
-                if let n = visit.notes { Text(n).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                .font(.toon(12, .bold)).foregroundStyle(Toon.muted)
+                if let n = visit.notes { Text(n).font(.toon(12, .semibold)).foregroundStyle(Toon.muted).lineLimit(2) }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .toonCard(radius: 18, shadow: 3)
         }
-        .padding(.vertical, 2)
     }
 
     private var timeSpan: String {
@@ -212,37 +265,70 @@ struct TripRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            ModeIcon(mode: trip.mode)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(modeText).font(.subheadline.weight(.medium))
-                    if trip.needsReview {
-                        Text("check").font(.caption2.weight(.semibold)).padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.orange.opacity(0.2), in: Capsule()).foregroundStyle(.orange)
-                    }
-                    if trip.hasGap { Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.caption).foregroundStyle(.secondary) }
+            // dashed "path" between the visit stickers
+            Rectangle().fill(.clear).frame(width: 44)
+                .overlay {
+                    Line().stroke(Toon.ink.opacity(0.35), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 7]))
+                        .frame(width: 3)
                 }
-                Text("\(Fmt.time(trip.departure))–\(Fmt.time(trip.arrival)) · \(Fmt.duration(trip.duration)) · \(Fmt.distance(trip.distance))")
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        ForEach(Array(uniqueModes.prefix(3).enumerated()), id: \.offset) { _, m in ModeIcon(mode: m, size: 30) }
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 6) {
+                            Text(modeText).font(.toon(14, .heavy)).foregroundStyle(Toon.ink)
+                            if trip.needsReview { ToonBadge(text: "check") }
+                            if trip.hasGap { Image(systemName: "antenna.radiowaves.left.and.right.slash").font(.caption).foregroundStyle(Toon.muted) }
+                        }
+                        Text("\(Fmt.time(trip.departure))–\(Fmt.time(trip.arrival)) · \(Fmt.duration(trip.duration)) · \(Fmt.distance(trip.distance))")
+                            .font(.toon(12, .bold)).monospacedDigit().foregroundStyle(Toon.muted)
+                    }
+                }
                 if trip.needsReview {
-                    HStack(spacing: 6) {
-                        ForEach(quickModes.filter { $0 != trip.mode }.prefix(3)) { m in
-                            Button { onQuickMode(m) } label: {
-                                Label(m.label, systemImage: m.symbol).font(.caption).labelStyle(.titleAndIcon)
-                                    .lineLimit(1).fixedSize()
-                            }
-                            .buttonStyle(.bordered).controlSize(.small)
-                        }
-                        if trip.modeAuto != nil && trip.modeAuto != .unknown {
-                            Button { onQuickMode(trip.mode) } label: { Image(systemName: "checkmark") }
-                                .buttonStyle(.bordered).controlSize(.small).tint(.green)
-                        }
+                    Text("Did I get that right?").font(.toon(13, .heavy)).foregroundStyle(Toon.ink)
+                    // full labels when they fit, icons only on narrow screens
+                    ViewThatFits(in: .horizontal) {
+                        quickButtons(iconOnly: false)
+                        quickButtons(iconOnly: true)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(trip.needsReview ? 12 : 4)
+            .background {
+                if trip.needsReview { Color.clear.toonCard(Toon.cream, radius: 18, shadow: 0, dashed: true) }
+            }
         }
-        .padding(.vertical, 2)
-        .padding(.leading, 8)
+    }
+
+    private func quickButtons(iconOnly: Bool) -> some View {
+        HStack(spacing: 6) {
+            ForEach(quickModes.filter { $0 != trip.mode }.prefix(3)) { m in
+                Button { onQuickMode(m) } label: {
+                    if iconOnly {
+                        Image(systemName: m.symbol).accessibilityLabel(m.label)
+                    } else {
+                        Label(m.label, systemImage: m.symbol).labelStyle(.titleAndIcon)
+                            .lineLimit(1).fixedSize()
+                    }
+                }
+                .buttonStyle(ToonButtonStyle(height: 34, fontSize: 12, shadow: 2))
+            }
+            if trip.modeAuto != nil && trip.modeAuto != .unknown {
+                Button { onQuickMode(trip.mode) } label: { Image(systemName: "checkmark").fontWeight(.black) }
+                    .buttonStyle(ToonButtonStyle(fill: Toon.lime, height: 34, fontSize: 13, shadow: 2))
+                    .accessibilityLabel("Confirm \(trip.mode.label)")
+            }
+        }
+        .padding(.trailing, 2)
+    }
+
+    private var uniqueModes: [TravelMode] {
+        var uniq: [TravelMode] = []
+        for m in trip.segments.map(\.mode) where uniq.last != m { uniq.append(m) }
+        return uniq.isEmpty || trip.modeUser != nil ? [trip.mode] : uniq
     }
 
     private var modeText: String {
@@ -251,6 +337,16 @@ struct TripRow: View {
         for m in segs where uniq.last != m { uniq.append(m) }
         if uniq.count > 1 && trip.modeUser == nil { return uniq.map(\.label).joined(separator: " + ") }
         return trip.mode.label
+    }
+}
+
+/// Vertical line used for the dashed path between diary stickers.
+struct Line: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.midX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+        return p
     }
 }
 
@@ -266,28 +362,29 @@ struct DayMap: View {
                 if t.segments.count > 1 {
                     ForEach(t.segments) { s in
                         if let poly = s.routePolyline {
-                            MapPolyline(coordinates: Polyline.decode(poly).map(\.cl))
-                                .stroke(s.mode.color, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                            let coords = Polyline.decode(poly).map(\.cl)
+                            MapPolyline(coordinates: coords)
+                                .stroke(Toon.ink, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                            MapPolyline(coordinates: coords)
+                                .stroke(s.mode.color, style: ToonMap.style(for: s.mode))
                         }
                     }
                 } else if t.route.count >= 2 {
                     MapPolyline(coordinates: t.route.map(\.cl))
-                        .stroke(t.mode.color, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                        .stroke(Toon.ink, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                    MapPolyline(coordinates: t.route.map(\.cl))
+                        .stroke(t.mode.color, style: ToonMap.style(for: t.mode))
                 }
             }
             ForEach(data.visits) { v in
                 let p = v.placeID.flatMap { data.places[$0] }
-                Annotation(p?.isNamed == true ? p!.displayName : "", coordinate: (p?.coordinate ?? v.coordinate).cl) {
-                    Image(systemName: p?.category?.symbol ?? "circle.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 20, height: 20)
-                        .background(Color.accentColor, in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                Annotation("", coordinate: (p?.coordinate ?? v.coordinate).cl, anchor: .center) {
+                    ToonPin(symbol: p?.category?.symbol ?? "mappin", color: p?.category?.toonColor ?? Toon.accent,
+                            label: p?.isNamed == true ? p!.displayName : nil)
                 }
             }
         }
-        .mapStyle(.standard(pointsOfInterest: .excludingAll))
+        .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
         .onAppear { position = Self.camera(for: data) }
         .onChange(of: data.items.map(\.id)) { _, _ in position = Self.camera(for: data) }
     }
@@ -306,5 +403,47 @@ struct DayMap: View {
         let span = MKCoordinateSpan(latitudeDelta: max(0.01, (maxLat - minLat) * 1.3),
                                     longitudeDelta: max(0.012, (maxLon - minLon) * 1.3))
         return .region(MKCoordinateRegion(center: center, span: span))
+    }
+}
+
+// MARK: - Cartoon map pieces
+
+enum ToonMap {
+    /// Walking is drawn dotted, rail/transit dashed, everything else solid — on top of an ink casing.
+    static func style(for mode: TravelMode) -> StrokeStyle {
+        switch mode.group {
+        case .active: return StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round, dash: [1, 7])
+        case .transit, .longDistance: return StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round, dash: [9, 5])
+        default: return StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round)
+        }
+    }
+}
+
+/// Sticker-style map pin: coloured disc with an icon and an optional name tag underneath.
+struct ToonPin: View {
+    let symbol: String
+    let color: Color
+    var label: String?
+    var size: CGFloat = 26
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.45, weight: .bold))
+            .foregroundStyle(Toon.ink)
+            .frame(width: size, height: size)
+            .background(Circle().fill(color))
+            .overlay(Circle().strokeBorder(Toon.ink, lineWidth: 2.5))
+            .background(Circle().fill(Toon.ink).offset(x: 1.5, y: 2))
+            .overlay(alignment: .top) {
+                if let label, !label.isEmpty {
+                    Text(label)
+                        .font(.toon(11, .heavy)).foregroundStyle(Toon.ink)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(Toon.paper))
+                        .overlay(Capsule().strokeBorder(Toon.ink, lineWidth: 2))
+                        .offset(y: size + 3)
+                }
+            }
     }
 }

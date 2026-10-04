@@ -4,7 +4,18 @@ import HHTCore
 
 struct PlacesView: View {
     @EnvironmentObject var model: AppModel
-    enum Sort: String, CaseIterable, Identifiable { case time = "Time", visits = "Visits", recent = "Recent", name = "Name"; var id: String { rawValue } }
+    enum Sort: String, CaseIterable, Identifiable {
+        case time = "Time", visits = "Visits", recent = "Recent", name = "Name"
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .time: return "Most time"
+            case .visits: return "Visits"
+            case .recent: return "Recent"
+            case .name: return "A–Z"
+            }
+        }
+    }
 
     @State private var places: [Place] = []
     @State private var stats: [String: TravelStore.PlaceStats] = [:]
@@ -12,40 +23,95 @@ struct PlacesView: View {
     @State private var sort: Sort = .time
     @State private var namedOnly = false
 
+    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+    private let tilts: [Double] = [-1.5, 1.5, 1, -1, -1, 1.5]
+
     var body: some View {
-        List {
-            Section {
-                Picker("Sort", selection: $sort) { ForEach(Sort.allCases) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented)
-                Toggle("Named places only", isOn: $namedOnly)
-            }
-            Section("\(shown.count) places") {
-                ForEach(shown) { p in
-                    NavigationLink { PlaceDetailView(placeID: p.id) } label: {
-                        HStack {
-                            Image(systemName: p.category?.symbol ?? "mappin")
-                                .foregroundStyle(p.isNamed ? Color.accentColor : .secondary).frame(width: 26)
-                            VStack(alignment: .leading) {
-                                Text(p.isNamed ? p.displayName : (p.address ?? "Unnamed place"))
-                                    .foregroundStyle(p.isNamed ? .primary : .secondary)
-                                let s = stats[p.id]
-                                Text("\(s?.visitCount ?? 0) visits · \(Fmt.hours(s?.totalDwell ?? 0))"
-                                     + (s?.lastVisit.map { " · last \(Fmt.shortDay($0))" } ?? ""))
-                                    .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("\(places.count) spot\(places.count == 1 ? "" : "s") on your map")
+                    .font(.toon(15, .heavy)).foregroundStyle(Toon.muted)
+                searchField
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Sort.allCases) { s in pill(s.title, on: sort == s) { sort = s } }
+                        pill("Named", on: namedOnly, icon: namedOnly ? "checkmark" : nil) { namedOnly.toggle() }
+                    }
+                    .padding(.vertical, 4).padding(.trailing, 4)
+                }
+
+                let named = shown.filter(\.isNamed)
+                let unnamed = shown.filter { !$0.isNamed }
+                if shown.isEmpty {
+                    HStack(spacing: 12) {
+                        Mascot(size: 44)
+                        Text(query.isEmpty ? "No places yet. They appear once you've stayed somewhere a few minutes."
+                                           : "No places match “\(query)”.")
+                            .font(.toon(14, .bold)).foregroundStyle(Toon.muted)
+                    }
+                    .padding(.top, 8)
+                }
+                if !named.isEmpty {
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(Array(named.enumerated()), id: \.element.id) { i, p in
+                            NavigationLink { PlaceDetailView(placeID: p.id) } label: {
+                                PlaceTile(place: p, stats: stats[p.id]).tilt(tilts[i % tilts.count])
                             }
-                            if p.favorite { Spacer(); Image(systemName: "star.fill").foregroundStyle(.yellow).font(.caption) }
+                            .buttonStyle(.plain)
                         }
+                    }
+                    .padding(.vertical, 4)
+                }
+                if !unnamed.isEmpty {
+                    SectionLabel(text: "Waiting for a name").padding(.top, 6)
+                    ForEach(unnamed) { p in
+                        NavigationLink { PlaceDetailView(placeID: p.id) } label: {
+                            UnnamedPlaceRow(place: p, stats: stats[p.id])
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
         }
-        .groupedList()
-        .searchable(text: $query, prompt: "Search places")
+        .scrollDismissesKeyboard(.immediately)
+        .background(ToonBackground())
         .navigationTitle("Places")
         .task(id: model.revision) {
             places = (try? model.store.places()) ?? []
             stats = (try? model.store.placeStats()) ?? [:]
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .bold)).foregroundStyle(Toon.ink)
+            TextField("Search places", text: $query)
+                .font(.toon(15, .bold)).foregroundStyle(Toon.ink)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Toon.muted) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 50)
+        .toonCard(radius: 25, shadow: 3)
+    }
+
+    private func pill(_ title: String, on: Bool, icon: String? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let icon { Image(systemName: icon).fontWeight(.black) }
+                Text(title)
+            }
+        }
+        .buttonStyle(ToonButtonStyle(fill: on ? Toon.ink : Toon.paper, height: 36, fontSize: 13,
+                                     shadow: on ? 0 : 2, text: on ? .white : Toon.ink))
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var shown: [Place] {
@@ -61,6 +127,64 @@ struct PlacesView: View {
         case .recent: return ps.sorted { (stats[$0.id]?.lastVisit ?? .distantPast) > (stats[$1.id]?.lastVisit ?? .distantPast) }
         case .name: return ps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         }
+    }
+}
+
+/// Named place as a square sticker in the two-column grid.
+struct PlaceTile: View {
+    let place: Place
+    let stats: TravelStore.PlaceStats?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ToonChip(symbol: place.category?.symbol ?? "mappin", color: place.toonColor, size: 52)
+            Text(place.displayName)
+                .font(.toon(18, .bold)).foregroundStyle(Toon.ink)
+                .lineLimit(2).multilineTextAlignment(.leading)
+            Text("\(stats?.visitCount ?? 0) visits · \(Fmt.hours(stats?.totalDwell ?? 0))"
+                 + (stats?.lastVisit.map { "\nlast \(Fmt.shortDay($0))" } ?? ""))
+                .font(.toon(12, .bold)).foregroundStyle(Toon.muted)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
+        .padding(14)
+        .toonCard(radius: 22, shadow: 4)
+        .overlay(alignment: .topTrailing) {
+            if place.favorite {
+                Image(systemName: "star.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(Toon.ink)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Toon.sun))
+                    .overlay(Circle().strokeBorder(Toon.ink, lineWidth: 2))
+                    .offset(x: 8, y: -8)
+                    .accessibilityLabel("Favorite")
+            }
+        }
+    }
+}
+
+/// Unnamed place: dashed sticker with a "Name it" nudge (the whole row opens the place).
+struct UnnamedPlaceRow: View {
+    let place: Place
+    let stats: TravelStore.PlaceStats?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ToonChip(symbol: place.category?.symbol ?? "mappin", color: Toon.stone, size: 46)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place.address ?? "Unnamed place").font(.toon(15, .heavy)).foregroundStyle(Toon.ink).lineLimit(2)
+                Text("\(stats?.visitCount ?? 0) visits · \(Fmt.hours(stats?.totalDwell ?? 0))"
+                     + (stats?.lastVisit.map { " · last \(Fmt.shortDay($0))" } ?? ""))
+                    .font(.toon(12, .bold)).foregroundStyle(Toon.muted)
+            }
+            Spacer(minLength: 0)
+            Text("Name it")
+                .font(.toon(13, .black)).foregroundStyle(Toon.ink)
+                .padding(.horizontal, 14).frame(height: 38)
+                .toonCard(Toon.accent, radius: 19, shadow: 2)
+        }
+        .padding(14)
+        .toonCard(Toon.cream, radius: 22, shadow: 0, dashed: true)
     }
 }
 
@@ -82,9 +206,10 @@ struct PlaceDetailView: View {
                 Section {
                     Map(initialPosition: .region(MKCoordinateRegion(center: p.coordinate.cl, latitudinalMeters: max(500, p.radius * 5),
                                                                     longitudinalMeters: max(500, p.radius * 5)))) {
-                        MapCircle(center: p.coordinate.cl, radius: p.radius).foregroundStyle(.blue.opacity(0.15)).stroke(.blue, lineWidth: 1)
+                        MapCircle(center: p.coordinate.cl, radius: p.radius).foregroundStyle(Toon.accent.opacity(0.15))
+                            .stroke(Toon.ink, style: StrokeStyle(lineWidth: 2.5, dash: [6, 4]))
                         ForEach(visits.prefix(200)) { v in
-                            MapCircle(center: v.coordinate.cl, radius: 4).foregroundStyle(.orange)
+                            MapCircle(center: v.coordinate.cl, radius: 4).foregroundStyle(Toon.accent).stroke(Toon.ink, lineWidth: 1)
                         }
                     }
                     .frame(height: 200).listRowInsets(EdgeInsets())
@@ -137,6 +262,7 @@ struct PlaceDetailView: View {
                 Text("This place no longer exists (it may have been merged).")
             }
         }
+        .toonBackground()
         .navigationTitle(place?.displayName ?? "Place")
         .inlineTitle()
         .task(id: model.revision) { load() }

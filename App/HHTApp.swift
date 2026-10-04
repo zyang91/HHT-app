@@ -13,6 +13,10 @@ struct HHTApp: App {
     @StateObject private var model = AppModel.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    #if os(iOS)
+    init() { Toon.configureAppearance() }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             RootView()
