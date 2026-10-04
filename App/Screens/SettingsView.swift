@@ -42,6 +42,7 @@ struct SettingsView: View {
             }
             aboutSection
         }
+        .toonBackground()
         .navigationTitle("Settings")
         .inlineTitle()
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

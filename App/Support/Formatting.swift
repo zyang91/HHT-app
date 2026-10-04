@@ -76,11 +76,11 @@ enum Fmt {
 extension ModeGroup {
     var color: Color {
         switch self {
-        case .active: return .green
-        case .car: return .orange
-        case .transit: return .blue
-        case .longDistance: return .purple
-        case .other: return .gray
+        case .active: return Toon.lime
+        case .car: return Toon.grape
+        case .transit: return Toon.sky
+        case .longDistance: return Toon.bubblegum
+        case .other: return Toon.stone
         }
     }
 }
@@ -88,9 +88,11 @@ extension ModeGroup {
 extension TravelMode {
     var color: Color {
         switch self {
-        case .run: return .mint
-        case .bicycle, .ebike, .scooter: return .teal
-        case .subway, .lightRail, .commuterRail: return .indigo
+        case .run: return Toon.mint
+        case .bicycle, .ebike, .scooter: return Toon.sun
+        case .bus, .coach, .shuttle: return Toon.orange
+        case .ferry: return Toon.teal
+        case .airplane: return Toon.aqua
         default: return group.color
         }
     }
@@ -112,7 +114,7 @@ extension View {
 
     @ViewBuilder func groupedList() -> some View {
         #if os(iOS)
-        self.listStyle(.insetGrouped)
+        self.listStyle(.insetGrouped).toonBackground()
         #else
         self
         #endif
@@ -141,8 +143,10 @@ struct StatPill: View {
     let label: String
     var body: some View {
         VStack(spacing: 2) {
-            Text(value).font(.headline.monospacedDigit())
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.toon(17, .bold).monospacedDigit()).foregroundStyle(Toon.ink)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.toon(11, .bold)).foregroundStyle(Toon.muted)
+                .lineLimit(2).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }
@@ -152,10 +156,6 @@ struct ModeIcon: View {
     let mode: TravelMode
     var size: CGFloat = 28
     var body: some View {
-        Image(systemName: mode.symbol)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(mode.color, in: Circle())
+        ToonChip(symbol: mode.symbol, color: mode.color, size: size)
     }
 }

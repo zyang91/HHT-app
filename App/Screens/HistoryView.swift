@@ -16,33 +16,70 @@ struct HistoryView: View {
     @EnvironmentObject var model: AppModel
     @State private var months: [(month: Date, days: [DaySummary])] = []
     @State private var flightsCount = 0
+    @State private var weekOffset = 0
 
     var body: some View {
         List {
             if model.isProcessing || model.inferenceFailure != nil {
-                Section { InferenceStatusBanner() }
+                Section { InferenceStatusBanner().toonRow(top: 8, bottom: 8) }
             }
             Section {
-                NavigationLink { TripSearchView() } label: { Label("Find trips…", systemImage: "line.3.horizontal.decrease.circle") }
-                NavigationLink { FlightsView() } label: {
-                    Label("Flights", systemImage: "airplane").badge(flightsCount)
-                }
-                NavigationLink { LifePhasesView() } label: { Label("Life phases", systemImage: "calendar.badge.clock") }
+                WeekChart(days: months.flatMap(\.days), offset: $weekOffset).toonRow(top: 8, bottom: 10)
+            }
+            Section {
+                shortcut("line.3.horizontal.decrease.circle", Toon.paper, "Find trips…", tilt: -1) { TripSearchView() }
+                shortcut("airplane", Toon.aqua, "Flights", count: flightsCount, tilt: 1) { FlightsView() }
+                shortcut("calendar.badge.clock", Toon.bubblegum, "Life phases", tilt: -0.5) { LifePhasesView() }
             }
             ForEach(months, id: \.month) { m in
-                Section(monthTitle(m.month)) {
+                Section {
                     ForEach(m.days) { d in
-                        NavigationLink { DayView(day: d.day, fixedDay: true) } label: { DayRow(summary: d) }
+                        DayRow(summary: d)
+                            .background(NavigationLink { DayView(day: d.day, fixedDay: true) } label: { EmptyView() }.opacity(0))
+                            .toonRow(top: 7, bottom: 7)
                     }
+                } header: {
+                    Text(monthTitle(m.month))
+                        .font(.toon(16, .bold)).foregroundStyle(.white).textCase(nil)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Toon.ink))
+                        .tilt(-2)
+                        .padding(.vertical, 4)
                 }
             }
             if months.isEmpty {
-                Text("No trips yet. Your history will build up here day by day.").foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Mascot(size: 44)
+                    Text("No trips yet. Your history will build up here day by day.")
+                        .font(.toon(14, .bold)).foregroundStyle(Toon.muted)
+                }
+                .toonRow()
             }
         }
+        .listSectionSpacing(.compact)
         .groupedList()
         .navigationTitle("Timeline")
         .task(id: model.revision) { load() }
+    }
+
+    private func shortcut<D: View>(_ symbol: String, _ color: Color, _ title: String, count: Int = 0, tilt: Double,
+                                   @ViewBuilder destination: @escaping () -> D) -> some View {
+        HStack(spacing: 12) {
+            ToonChip(symbol: symbol, color: color, size: 36)
+            Text(title).font(.toon(16, .heavy)).foregroundStyle(Toon.ink)
+            Spacer()
+            if count > 0 {
+                Text("\(count)").font(.toon(12, .black)).foregroundStyle(.white)
+                    .frame(minWidth: 24, minHeight: 24)
+                    .background(Capsule().fill(Toon.ink))
+            }
+            Image(systemName: "chevron.right").font(.system(size: 14, weight: .heavy)).foregroundStyle(Toon.ink)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .toonCard(radius: 18, shadow: 3)
+        .tilt(tilt)
+        .background(NavigationLink { destination() } label: { EmptyView() }.opacity(0))
+        .toonRow(top: 6, bottom: 6)
     }
 
     private func monthTitle(_ d: Date) -> String {
@@ -83,24 +120,128 @@ struct HistoryView: View {
     }
 }
 
-struct DayRow: View {
-    let summary: DaySummary
+/// "This week" sticker: one chunky bar per day, flip back through earlier weeks.
+struct WeekChart: View {
+    let days: [DaySummary]
+    @Binding var offset: Int   // 0 = this week, -1 = last week…
+
+    private var cal: Calendar { Calendar.current }
+
+    private var week: [(day: Date, summary: DaySummary?)] {
+        let ref = cal.date(byAdding: .weekOfYear, value: offset, to: Date())!
+        let start = cal.dateInterval(of: .weekOfYear, for: ref)!.start
+        let byDay = Dictionary(days.map { ($0.day, $0) }, uniquingKeysWith: { a, _ in a })
+        return (0..<7).map { i in
+            let d = cal.date(byAdding: .day, value: i, to: start)!
+            return (d, byDay[d])
+        }
+    }
+
+    private var title: String {
+        switch offset {
+        case 0: return "This week"
+        case -1: return "Last week"
+        default:
+            let w = week
+            return "\(w.first!.day.formatted(.dateTime.month(.abbreviated).day())) – \(w.last!.day.formatted(.dateTime.month(.abbreviated).day()))"
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(Fmt.shortDay(summary.day)).font(.subheadline.weight(.semibold))
-                if summary.flight { Image(systemName: "airplane").font(.caption).foregroundStyle(.purple) }
-                Spacer()
-                HStack(spacing: 2) {
-                    ForEach(summary.modes.prefix(4)) { m in Image(systemName: m.symbol).font(.caption2).foregroundStyle(m.color) }
+        let w = week
+        let trips = w.reduce(0) { $0 + ($1.summary?.trips ?? 0) }
+        let dist = w.reduce(0.0) { $0 + ($1.summary?.distance ?? 0) }
+        let peak = max(1, w.map { $0.summary?.trips ?? 0 }.max() ?? 1)
+        let busiest = w.filter { ($0.summary?.trips ?? 0) > 0 }.max { ($0.summary?.trips ?? 0) < ($1.summary?.trips ?? 0) }
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button { withAnimation(.spring(duration: 0.4, bounce: 0.35)) { offset -= 1 } } label: {
+                    Image(systemName: "chevron.left").fontWeight(.black)
+                }
+                .buttonStyle(ToonButtonStyle(height: 30, fontSize: 12, shadow: 2))
+                .accessibilityLabel("Previous week")
+                Text(title).font(.toon(18, .bold)).foregroundStyle(Toon.ink).lineLimit(1).minimumScaleFactor(0.8)
+                Button { withAnimation(.spring(duration: 0.4, bounce: 0.35)) { offset += 1 } } label: {
+                    Image(systemName: "chevron.right").fontWeight(.black)
+                }
+                .buttonStyle(ToonButtonStyle(fill: offset < 0 ? Toon.paper : Toon.stone, height: 30, fontSize: 12, shadow: offset < 0 ? 2 : 0))
+                .disabled(offset >= 0)
+                .accessibilityLabel("Next week")
+                Spacer(minLength: 4)
+                Text("\(trips) trip\(trips == 1 ? "" : "s") · \(Fmt.distance(dist))")
+                    .font(.toon(13, .heavy)).foregroundStyle(Toon.muted).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(w, id: \.day) { d in
+                    let n = d.summary?.trips ?? 0
+                    let today = cal.isDateInToday(d.day)
+                    let future = d.day > Date()
+                    VStack(spacing: 4) {
+                        Text(n > 0 ? "\(n)" : " ").font(.toon(11, .black)).foregroundStyle(Toon.ink)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(today ? Toon.accent : (n == 0 ? Toon.paper : Toon.sky))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Toon.ink.opacity(future ? 0.3 : 1),
+                                              style: StrokeStyle(lineWidth: Toon.line, dash: future ? [4, 4] : [])))
+                            .frame(height: 12 + 64 * CGFloat(n) / CGFloat(peak))
+                        Text(d.day.formatted(.dateTime.weekday(.narrow)))
+                            .font(.toon(12, .black)).foregroundStyle(today ? Toon.accentDeep : Toon.muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(d.day.formatted(.dateTime.weekday(.wide))): \(n) trips")
                 }
             }
-            Text("\(summary.trips) trips · \(Fmt.distance(summary.distance))" + (summary.needsReview > 0 ? " · \(summary.needsReview) to check" : ""))
-                .font(.caption).foregroundStyle(.secondary)
-            if !summary.places.isEmpty {
-                Text(summary.places.prefix(4).joined(separator: " → ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            .frame(height: 112, alignment: .bottom)
+            if let b = busiest {
+                Text("Busiest day: \(b.day.formatted(.dateTime.weekday(.wide))), \(b.summary!.trips) trips")
+                    .font(.toon(12, .heavy)).foregroundStyle(Toon.muted)
+            } else {
+                Text(offset == 0 ? "A fresh week. Where to first?" : "A quiet week, no trips recorded.")
+                    .font(.toon(12, .heavy)).foregroundStyle(Toon.muted)
             }
         }
+        .padding(14)
+        .toonCard(radius: 22, shadow: 4)
+    }
+}
+
+struct DayRow: View {
+    let summary: DaySummary
+
+    private var isToday: Bool { Calendar.current.isDateInToday(summary.day) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(spacing: 0) {
+                Text(summary.day.formatted(.dateTime.day())).font(.toon(24, .bold)).monospacedDigit()
+                Text(summary.day.formatted(.dateTime.weekday(.abbreviated)).uppercased()).font(.toon(11, .black))
+            }
+            .foregroundStyle(Toon.ink)
+            .frame(width: 54, height: 58)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(isToday ? Toon.accent : Toon.cream))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Toon.ink, lineWidth: Toon.line))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if summary.flight { Image(systemName: "airplane").font(.system(size: 13, weight: .bold)).foregroundStyle(Toon.ink) }
+                    Text(summary.places.isEmpty ? Fmt.shortDay(summary.day) : summary.places.prefix(4).joined(separator: " → "))
+                        .font(.toon(14, .heavy)).foregroundStyle(Toon.ink).lineLimit(2)
+                    Spacer(minLength: 0)
+                    if summary.needsReview > 0 { ToonBadge(text: "\(summary.needsReview) to check") }
+                }
+                HStack(spacing: 6) {
+                    HStack(spacing: 3) {
+                        ForEach(summary.modes.prefix(4)) { m in ModeIcon(mode: m, size: 24) }
+                    }
+                    Text("\(summary.trips) trips · \(Fmt.distance(summary.distance))")
+                        .font(.toon(12, .bold)).foregroundStyle(Toon.muted).lineLimit(1).minimumScaleFactor(0.8)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .toonCard(radius: 20, shadow: 4)
     }
 }
 
@@ -149,6 +290,7 @@ struct TripSearchView: View {
                 }
             }
         }
+        .toonBackground()
         .navigationTitle("Find trips")
         .inlineTitle()
         .sheet(item: $selected) { b in TripDetailView(tripID: b.id).environmentObject(model) }

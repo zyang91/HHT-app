@@ -49,6 +49,7 @@ struct FlightsView: View {
                 }
             }
         }
+        .toonBackground()
         .navigationTitle("Flights")
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { adding = true } label: { Image(systemName: "plus") } } }
         .sheet(isPresented: $adding) { FlightEditor(flight: nil).environmentObject(model) }
@@ -145,6 +146,7 @@ struct LifePhasesView: View {
                 Text("Periods like a semester, a job or a city of residence. Stats can be computed and compared per phase.")
             }
         }
+        .toonBackground()
         .navigationTitle("Life phases")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -222,6 +224,7 @@ struct ReviewView: View {
                 .onTapGesture { selected = IDBox(id: t.id) }
             }
         }
+        .toonBackground()
         .navigationTitle("To check")
         .sheet(item: $selected) { b in TripDetailView(tripID: b.id).environmentObject(model) }
         .task(id: model.revision) {
