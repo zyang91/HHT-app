@@ -139,10 +139,10 @@ struct SettingsView: View {
     private var maintenanceSection: some View {
         Section {
             Button("Rebuild last 7 days from raw data") {
-                Task { await model.reprocess(from: Date().addingTimeInterval(-7 * 86_400), to: Date()); message = "Rebuilt. Your edits were kept." }
+                Task { await model.reprocess(from: Date().addingTimeInterval(-7 * 86_400), to: Date()); message = rebuildMessage }
             }
             Button("Rebuild everything from raw data") {
-                Task { await model.reprocess(from: .distantPast, to: Date()); message = "Rebuilt. Your edits were kept." }
+                Task { await model.reprocess(from: .distantPast, to: Date()); message = rebuildMessage }
             }
             Button("Back up database now") {
                 do { let u = try model.backupNow(); message = "Saved \(u.lastPathComponent) in Files › HHT › Backups" } catch { message = "\(error)" }
@@ -172,11 +172,22 @@ struct SettingsView: View {
                 LabeledContent(k, value: "\(counts[k] ?? 0)")
             }
             LabeledContent("Schema version", value: "\(model.store.schemaVersion)")
+            LabeledContent("Last diary update") {
+                if model.isProcessing { Text("Running now…") }
+                else if let d = model.lastInferenceAt { Text(d, format: .relative(presentation: .named)) }
+                else { Text("Never") }
+            }
             LabeledContent("Stay radius / min dwell", value: "\(Int(model.engine.config.stayRadius)) m / \(Int(model.engine.config.minStayDuration / 60)) min")
         }
     }
 
     // MARK: actions
+
+    private var rebuildMessage: String {
+        if model.isProcessing { return "Queued; it runs as soon as the update in progress finishes." }
+        if let f = model.inferenceFailure { return "Rebuild failed: \(f.message)" }
+        return "Rebuilt. Your edits were kept."
+    }
 
     private func export() {
         busy = true

@@ -13,6 +13,8 @@ public final class InferenceEngine {
     public var config: InferenceConfig
     /// Optional hook to enrich newly created places (e.g. reverse geocoding, if the user enabled it).
     public var onPlaceCreated: ((Place) -> Void)?
+    /// Optional hook called at each phase boundary (and every few stays while resolving), on the inference thread.
+    public var onProgress: ((Progress) -> Void)?
 
     public init(store: TravelStore, config: InferenceConfig = .default) {
         self.store = store
@@ -29,6 +31,54 @@ public final class InferenceEngine {
         public var tripsCreated = 0
         public var tripsRemoved = 0
         public var placesCreated = 0
+    }
+
+    public enum Phase: String, Sendable {
+        case loadingPoints, detectingStays, resolvingVisits, buildingTrips, finalizing
+    }
+
+    /// A snapshot of a run in flight: the phase, what has been done so far, and how many stays are resolved.
+    public struct Progress: Equatable, Sendable {
+        public var phase: Phase
+        public var report: Report
+        public var staysResolved = 0
+        public var staysTotal = 0
+    }
+
+    /// Accurate points newer than the diary's last stop that no run has turned into a visit or trip yet.
+    public struct UnresolvedTail: Equatable, Sendable {
+        public var since: Date
+        public var lastPoint: Date
+        public var pointCount: Int
+    }
+
+    /// When the last run committed (nil if inference has never run).
+    public var lastRunAt: Date? {
+        store.meta("last_inference_at").flatMap { isoFormatter.date(from: $0) }
+    }
+
+    /// Raw data past the latest visit: points after it closed, or, while it is still open,
+    /// from the first fix that left it. Nil when nothing (or only a couple of fixes) is outstanding.
+    public func unresolvedTail(now: Date = Date()) throws -> UnresolvedTail? {
+        let detector = StayDetector(config: config)
+        let tail: [RawPoint]
+        if let v = try store.latestVisit() {
+            let pts = detector.clean(try store.points(from: v.departure ?? v.arrival, to: now))
+            if v.departure != nil {
+                tail = pts
+            } else {
+                let radius = max(try v.placeID.flatMap(store.place)?.radius ?? config.newPlaceRadius, config.stayRadius)
+                    + config.placeMatchSlack
+                guard let i = pts.firstIndex(where: { Geo.distance($0.coordinate, v.coordinate) > radius }) else { return nil }
+                tail = Array(pts[i...])
+            }
+        } else if let first = store.firstPointDate() {
+            tail = detector.clean(try store.points(from: first, to: now))
+        } else {
+            return nil
+        }
+        guard tail.count >= 3, let a = tail.first, let b = tail.last else { return nil }
+        return UnresolvedTail(since: a.timestamp, lastPoint: b.timestamp, pointCount: tail.count)
     }
 
     /// Incremental run: reprocesses from the arrival of the latest visit (or the first point) to now.
@@ -56,10 +106,15 @@ public final class InferenceEngine {
         }
 
         var report = Report(windowStart: from, windowEnd: to)
+        func progress(_ phase: Phase, _ done: Int = 0, of total: Int = 0) {
+            onProgress?(Progress(phase: phase, report: report, staysResolved: done, staysTotal: total))
+        }
+        progress(.loadingPoints)
         try store.db.transaction {
             // a little context before the window so the anchor stay is detected exactly as in a full run
             let points = try store.points(from: from.addingTimeInterval(-config.contextMargin), to: to)
             report.pointsConsidered = points.count
+            progress(.detectingStays)
             let motion = MotionTimeline(try store.motion(from: from.addingTimeInterval(-3600), to: to))
             let detector = StayDetector(config: config)
             let clean = detector.clean(points)
@@ -72,9 +127,15 @@ public final class InferenceEngine {
             let existingTrips = try store.trips(overlapping: from, to, includeDeleted: true, withSegments: false)
                 .filter { $0.departure >= from && $0.departure <= to }
             let lockedTrips = existingTrips.filter { $0.userStatus.isLocked }
-            let lockedVisitIDs = Set(lockedTrips.flatMap { [$0.originVisitID, $0.destinationVisitID].compactMap { $0 } })
+            // a locked trip pins its endpoint visits even when it departs before the window
+            // (e.g. a corrected trip into the visit the incremental run starts from)
+            var lockedVisitIDs = Set(lockedTrips.flatMap { [$0.originVisitID, $0.destinationVisitID].compactMap { $0 } })
+            for v in existingVisits where try store.tripsReferencing(visitID: v.id, includeDeleted: true)
+                .contains(where: { $0.userStatus.isLocked }) {
+                lockedVisitIDs.insert(v.id)
+            }
             func isLocked(_ v: Visit) -> Bool { v.userStatus.isLocked || lockedVisitIDs.contains(v.id) }
-            let lockedVisits = existingVisits.filter(isLocked)
+            var lockedVisits = existingVisits.filter(isLocked)
             var reusableAuto = existingVisits.filter { !isLocked($0) && !$0.deleted }
             var keptVisitIDs = Set<String>()
 
@@ -82,22 +143,57 @@ public final class InferenceEngine {
                 max(0, min(a1, b1).timeIntervalSince(max(a0, b0)))
             }
 
+            // an open locked visit only absorbs stays at its own place
+            func isNear(_ c: Coordinate, _ v: Visit) throws -> Bool {
+                let radius = try v.placeID.flatMap(store.place)?.radius ?? config.newPlaceRadius
+                return Geo.distance(c, v.coordinate) <= max(radius, config.stayRadius) + config.placeMatchSlack
+            }
+            func setDeparture(_ lv: inout Visit, _ e: Date) throws {
+                lv.departure = e
+                lv.updatedAt = Date()
+                try store.upsertVisit(lv)
+                // keep the copy in sync so later stays aren't absorbed into the now-closed visit
+                let id = lv.id
+                if let i = lockedVisits.firstIndex(where: { $0.id == id }) { lockedVisits[i] = lv }
+                try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
+            }
+            // a stop deleted while still open covers the stay it was, not everything up to now
+            func deletedEnd(_ v: Visit) -> Date {
+                if let d = v.departure { return d }
+                guard let s = stays.first(where: {
+                    $0.start <= v.arrival.addingTimeInterval(config.minStayDuration) && ($0.end ?? now) > v.arrival
+                }) else { return v.arrival }
+                return s.end ?? now
+            }
+
             // 1. resolve each detected stay to a visit (locked, reused auto, or new)
             var resolved: [Visit] = []
-            for stay in stays {
+            progress(.resolvingVisits, 0, of: stays.count)
+            for (si, stay) in stays.enumerated() {
+                if si > 0 && si % 20 == 0 { progress(.resolvingVisits, si, of: stays.count) }
                 let sEnd = stay.end ?? now
                 let sDur = max(1, sEnd.timeIntervalSince(stay.start))
+                // showing up somewhere else ends an open locked visit ("still here" said later wins),
+                // at the last fix still near it
+                for var lv in lockedVisits where !lv.deleted && lv.departure == nil && lv.arrival < stay.start {
+                    guard try !isNear(stay.centroid, lv),
+                          try !(store.heldOpenAt(visitID: lv.id).map { $0 > stay.start } ?? false) else { continue }
+                    let lastNear = try clean.filter { $0.timestamp > lv.arrival && $0.timestamp < stay.start }
+                        .last { try isNear($0.coordinate, lv) }
+                    try setDeparture(&lv, lastNear?.timestamp ?? stay.start)
+                }
                 // user said this time was travel, or deleted this stop
                 if lockedTrips.contains(where: { !$0.deleted && overlap($0.departure, $0.arrival, stay.start, sEnd) > 0.5 * sDur })
-                    || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0.5 * sDur }) {
+                    || lockedVisits.contains(where: { $0.deleted && overlap($0.arrival, deletedEnd($0), stay.start, sEnd) > 0.5 * sDur }) {
                     continue
                 }
                 if var lv = lockedVisits.first(where: { !$0.deleted && overlap($0.arrival, $0.departure ?? now, stay.start, sEnd) > 0 }) {
-                    if lv.departure == nil, let e = stay.end {
-                        lv.departure = e
-                        lv.updatedAt = Date()
-                        try store.upsertVisit(lv)
-                        try store.audit("visit", lv.id, "infer_departure", field: "departure_ts", old: nil, new: iso(e))
+                    // close at the end of this stay unless the next stay is back at the same place (GPS split),
+                    // or the user marked "still here" after it ended
+                    if lv.departure == nil, let e = stay.end,
+                       try !(stays.indices.contains(si + 1) && isNear(stays[si + 1].centroid, lv)),
+                       try !(store.heldOpenAt(visitID: lv.id).map { $0 > e } ?? false) {
+                        try setDeparture(&lv, e)
                     }
                     if resolved.last?.id != lv.id { resolved.append(lv) } else { resolved[resolved.count - 1] = lv }
                     keptVisitIDs.insert(lv.id)
@@ -127,6 +223,7 @@ public final class InferenceEngine {
             resolved.sort { $0.arrival < $1.arrival }
 
             // 2. drop auto trips in the window; they are rebuilt below
+            progress(.buildingTrips, stays.count, of: stays.count)
             for t in existingTrips where !t.userStatus.isLocked {
                 try store.db.run("UPDATE flights SET trip_id = NULL WHERE trip_id = ?", t.id)
                 try store.db.run("DELETE FROM trips WHERE id = ?", t.id)
@@ -167,6 +264,7 @@ public final class InferenceEngine {
                     if trip.mode == .airplane { try linkFlight(for: trip, from: a, to: b) }
                 }
             }
+            progress(.finalizing, stays.count, of: stays.count)
             try store.pruneOrphanPlaces()
         }
         try store.setMeta("last_inference_at", iso(now))

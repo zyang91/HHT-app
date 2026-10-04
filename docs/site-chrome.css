@@ -1,0 +1,194 @@
+/* Navigation and footer mirrored from zyang91.github.io/css/home.css. */
+/* ── Navigation ───────────────────────────────────────────── */
+.site-nav {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 50;
+	background: rgba(250, 248, 244, 0.82);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+	border-bottom: 1px solid transparent;
+	transition: border-color 0.4s ease;
+}
+.site-nav.scrolled {
+	border-bottom-color: var(--line-soft);
+}
+.site-nav .nav-inner {
+	max-width: 1180px;
+	margin: 0 auto;
+	padding: 18px 36px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+}
+.nav-brand {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-width: 0;
+}
+.nav-name {
+	font-family: var(--serif);
+	font-size: 1.12rem;
+	font-weight: 600;
+	color: var(--ink);
+	text-decoration: none;
+	letter-spacing: 0.01em;
+	white-space: nowrap;
+}
+.nav-affil {
+	font-size: 0.72rem;
+	font-weight: 500;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+	border-left: 1px solid var(--line);
+	padding-left: 14px;
+	white-space: nowrap;
+}
+.nav-links {
+	display: flex;
+	align-items: center;
+	gap: 28px;
+}
+.nav-links a {
+	font-size: 0.86rem;
+	font-weight: 500;
+	letter-spacing: 0.04em;
+	color: var(--ink-soft);
+	text-decoration: none;
+	position: relative;
+	padding: 4px 0;
+	transition: color 0.25s ease;
+}
+.nav-links a::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 100%;
+	height: 1.5px;
+	background: var(--red);
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.nav-links a:hover,
+.nav-links a.active {
+	color: var(--ink);
+}
+.nav-links a:hover::after,
+.nav-links a.active::after {
+	transform: scaleX(1);
+}
+
+.nav-toggle {
+	display: none;
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 8px;
+	flex-direction: column;
+	gap: 5px;
+}
+.nav-toggle span {
+	display: block;
+	width: 22px;
+	height: 1.6px;
+	background: var(--ink);
+	transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.nav-toggle[aria-expanded='true'] span:nth-child(1) {
+	transform: translateY(6.6px) rotate(45deg);
+}
+.nav-toggle[aria-expanded='true'] span:nth-child(2) {
+	opacity: 0;
+}
+.nav-toggle[aria-expanded='true'] span:nth-child(3) {
+	transform: translateY(-6.6px) rotate(-45deg);
+}
+
+/* ── Footer ───────────────────────────────────────────────── */
+.site-footer {
+	padding: 80px 0 48px;
+}
+.footer-grid {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 40px;
+	flex-wrap: wrap;
+	padding-bottom: 48px;
+	border-bottom: 1px solid var(--line-soft);
+}
+.footer-name {
+	font-family: var(--serif);
+	font-size: 1.5rem;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+.footer-identity {
+	font-size: 0.86rem;
+	letter-spacing: 0.05em;
+	color: var(--ink-soft);
+}
+.footer-identity .dot {
+	color: var(--sand-deep);
+	margin: 0 7px;
+}
+.footer-links {
+	display: flex;
+	gap: 26px;
+	font-size: 0.88rem;
+	flex-wrap: wrap;
+}
+.footer-links a {
+	color: var(--ink-soft);
+	text-decoration: none;
+	position: relative;
+	padding-bottom: 2px;
+	transition: color 0.25s ease;
+}
+.footer-links a::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 100%;
+	height: 1px;
+	background: var(--red);
+	transform: scaleX(0);
+	transform-origin: left;
+	transition: transform 0.3s ease;
+}
+.footer-links a:hover { color: var(--red); }
+.footer-links a:hover::after { transform: scaleX(1); }
+/* A shared hometown signature, kept clear of links and copyright. */
+.footer-hometown {
+	width: min(100%, 620px);
+	margin: 24px auto 0;
+}
+.footer-hometown img {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+/* Preserve the same drawing on the two dark editorial footers. */
+body.map-page .footer-hometown img,
+body.plot-page .footer-hometown img {
+	filter: grayscale(1) brightness(0) invert(0.85);
+}
+
+.footer-note {
+	padding-top: 28px;
+	font-size: 0.78rem;
+	color: var(--ink-faint);
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+}
+

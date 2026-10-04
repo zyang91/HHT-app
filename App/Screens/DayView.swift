@@ -56,8 +56,18 @@ struct DayView: View {
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
+    /// Raw data past the last stop that falls on this day.
+    private var pendingTail: InferenceEngine.UnresolvedTail? {
+        guard let t = model.pendingTail else { return nil }
+        let r = DateRange.day(day)
+        return t.since < r.end && t.lastPoint >= r.start ? t : nil
+    }
+
     var body: some View {
         List {
+            if model.isProcessing || model.inferenceFailure != nil {
+                Section { InferenceStatusBanner().toonRow(top: 8, bottom: 8) }
+            }
             Section {
                 MascotSays(text: mascotLine).toonRow(top: 8, bottom: 8)
                 if !fixedDay && reviewCount > 0 {
@@ -73,7 +83,7 @@ struct DayView: View {
                 summary.toonRow(top: 8, bottom: 8)
             }
             Section {
-                if data.items.isEmpty {
+                if data.items.isEmpty && pendingTail == nil {
                     emptyState.toonRow()
                 } else {
                     ForEach(data.items) { item in
@@ -91,9 +101,12 @@ struct DayView: View {
                             .toonRow(top: 3, bottom: 3)
                         }
                     }
+                    if let tail = pendingTail { PendingActivityRow(tail: tail).toonRow(top: 5, bottom: 5) }
                 }
             } header: {
-                if !data.items.isEmpty { SectionLabel(text: "Your day, step by step") }
+                if !data.items.isEmpty || pendingTail != nil { SectionLabel(text: "Your day, step by step") }
+            } footer: {
+                if isToday { LastInferenceLabel(date: model.lastInferenceAt) }
             }
         }
         .listSectionSpacing(.compact)
@@ -126,6 +139,13 @@ struct DayView: View {
             .presentationDetents([.medium])
         }
         .task(id: "\(model.revision)-\(day.timeIntervalSince1970)") { reload() }
+        .task(id: isToday) {
+            // new fixes arrive without a revision bump; keep the pending tail current while today is on screen
+            while isToday && !Task.isCancelled {
+                if !model.isProcessing { model.refreshInferenceStatus() }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 
     private var summary: some View {
@@ -445,5 +465,128 @@ struct ToonPin: View {
                         .offset(y: size + 3)
                 }
             }
+    }
+}
+
+// MARK: - Inference status
+
+/// Shown while the diary is being rebuilt from raw data, or when the last rebuild failed.
+/// Nothing at all when inference is idle and healthy.
+struct InferenceStatusBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if model.isProcessing {
+            running.padding(.horizontal, 12).padding(.vertical, 8).toonCard(Toon.cream, radius: 18, shadow: 3)
+        } else if let f = model.inferenceFailure {
+            failed(f).padding(.horizontal, 12).padding(.vertical, 8).toonCard(Color(hex: 0xFFE3DC), radius: 18, shadow: 3)
+        }
+    }
+
+    private var running: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ProgressView().frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Updating your diary…").font(.subheadline.weight(.semibold))
+                Text(phaseText).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                if let p = model.progress, p.phase == .resolvingVisits, p.staysTotal > 1 {
+                    ProgressView(value: Double(p.staysResolved), total: Double(p.staysTotal))
+                }
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    Text(detailText(now: ctx.date)).font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func failed(_ f: AppModel.InferenceFailure) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Couldn't update your diary", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+            Text("Your recorded data is safe; the diary just hasn't caught up with it. \(f.at, format: .relative(presentation: .named)).")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(f.message).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
+            Button { Task { await model.runInference() } } label: { Label("Try again", systemImage: "arrow.clockwise") }
+                .buttonStyle(ToonButtonStyle(height: 34, fontSize: 12, shadow: 2))
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var phaseText: String {
+        let points = model.progress.map { " · \($0.report.pointsConsidered.formatted()) points" } ?? ""
+        switch model.phase {
+        case .syncingMotion, nil: return "Syncing motion activity"
+        case .engine(.loadingPoints): return "Loading location points"
+        case .engine(.detectingStays): return "Detecting stays" + points
+        case .engine(.resolvingVisits):
+            let p = model.progress
+            return "Matching visits" + (p.map { $0.staysTotal > 0 ? " (\($0.staysResolved) of \($0.staysTotal))" : "" } ?? "") + points
+        case .engine(.buildingTrips): return "Building trips" + points
+        case .engine(.finalizing): return "Saving"
+        }
+    }
+
+    private func detailText(now: Date) -> String {
+        var parts: [String] = []
+        if let r = model.progress?.report {
+            let visits = r.visitsCreated + r.visitsUpdated
+            if visits > 0 { parts.append("\(visits) visit\(visits == 1 ? "" : "s") so far") }
+            if r.tripsCreated > 0 { parts.append("\(r.tripsCreated) trip\(r.tripsCreated == 1 ? "" : "s")") }
+        }
+        if let s = model.runStartedAt {
+            let e = Int(max(0, now.timeIntervalSince(s)))
+            parts.append(String(format: "%d:%02d elapsed", e / 60, e % 60))
+        }
+        if model.rerunRequested { parts.append("another update queued") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// The end of the timeline when raw data exists past the last stop that no run has turned into a visit or trip yet.
+struct PendingActivityRow: View {
+    @EnvironmentObject var model: AppModel
+    let tail: InferenceEngine.UnresolvedTail
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: model.isProcessing ? "hourglass" : "ellipsis")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 28)
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3])))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not in your diary yet").font(.subheadline.weight(.medium))
+                Text("Since \(Fmt.time(tail.since)) · \(tail.pointCount.formatted()) points · last fix \(Fmt.time(tail.lastPoint))")
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                Text(model.isProcessing ? "Being processed now…"
+                     : "Recorded, not lost. It becomes a trip once you've stopped somewhere for ~5 minutes.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+            if !model.isProcessing {
+                Button("Update") { Task { await model.runInference() } }
+                    .buttonStyle(ToonButtonStyle(fill: Toon.accent, height: 34, fontSize: 12, shadow: 2))
+            }
+        }
+        .padding(12)
+        .toonCard(Toon.cream, radius: 18, shadow: 0, dashed: true)
+    }
+}
+
+/// "Diary updated 5 minutes ago", ticking.
+struct LastInferenceLabel: View {
+    let date: Date?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            if let d = date {
+                Text("Diary updated \(d, format: .relative(presentation: .named))")
+            } else {
+                Text("Diary not built yet")
+            }
+        }
+        .font(.caption2).foregroundStyle(.secondary)
     }
 }

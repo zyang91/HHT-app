@@ -307,9 +307,18 @@ public final class TravelStore: @unchecked Sendable {
         try trips(overlapping: .distantPast, .distantFuture, withSegments: withSegments)
     }
 
-    public func tripsReferencing(visitID: String) throws -> [Trip] {
-        try db.query("SELECT * FROM trips WHERE (origin_visit_id = ? OR destination_visit_id = ?) AND deleted = 0",
-                     visitID, visitID).map(Self.trip)
+    public func tripsReferencing(visitID: String, includeDeleted: Bool = false) throws -> [Trip] {
+        try db.query("SELECT * FROM trips WHERE (origin_visit_id = ? OR destination_visit_id = ?)"
+                     + (includeDeleted ? "" : " AND deleted = 0"), visitID, visitID).map(Self.trip)
+    }
+
+    /// When the user last cleared this visit's departure ("still here"), if that is their latest time edit.
+    public func heldOpenAt(visitID: String) throws -> Date? {
+        guard let r = try db.query("""
+            SELECT ts, new_value FROM audit_log
+            WHERE entity_id = ? AND action = 'set_times' AND field = 'departure_ts' ORDER BY id DESC LIMIT 1
+            """, visitID).first, r.string("new_value") == nil else { return nil }
+        return r.date("ts")
     }
 
     static func trip(_ r: Row) -> Trip {

@@ -275,3 +275,70 @@ let nyCalendar: Calendar = {
     c.timeZone = TimeZone(identifier: "America/New_York")!
     return c
 }()
+
+extension InferenceTests {
+    /// Long silent stay: a short walk-around mid-way must not end it at the last fix; the walk out does.
+    @Test func silentStayEndsWhenFinalWalkBegins() throws {
+        let start = Trajectory.date("2026-09-15 13:00")
+        var tr = Trajectory(start: start, at: Philly.penn)
+        tr.stay(minutes: 150)
+        tr.motion += [
+            MotionSample(timestamp: start.addingTimeInterval(80 * 60), activity: .walking, confidence: 2),
+            MotionSample(timestamp: start.addingTimeInterval(83 * 60), activity: .stationary, confidence: 2),
+            MotionSample(timestamp: start.addingTimeInterval(148 * 60), activity: .walking, confidence: 2),
+        ]
+        let now = start.addingTimeInterval(152 * 60)
+        let (_, visits, _) = try run(tr, now: now)
+        let end = try #require(visits.first?.departure)
+        #expect(minutes(end, start.addingTimeInterval(148 * 60)) < 1)
+        // still walking around mid-way → still there
+        let (_, early, _) = try run(tr, now: start.addingTimeInterval(84 * 60))
+        #expect(early.first?.departure == nil)
+    }
+}
+
+@Suite("Inference status")
+struct InferenceStatusTests {
+
+    // data recorded after the last stop shows up as an unresolved tail until a run resolves it
+    @Test func unresolvedTailTracksMovementPastTheLastStop() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-10-01 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        let store = try makeStore(tr)
+        let engine = InferenceEngine(store: store)
+        try engine.processNew(now: tr.t)
+        #expect(try engine.unresolvedTail(now: tr.t) == nil)         // still home: nothing outstanding
+        #expect(engine.lastRunAt != nil)
+
+        let leave = tr.t, already = tr.points.count
+        tr.move(to: Philly.penn, speed: 9, activity: .automotive)    // on the way, no new stop yet
+        try store.insertPoints(Array(tr.points[already...]))
+        let tail = try #require(try engine.unresolvedTail(now: tr.t))
+        #expect(minutes(tail.since, leave) < 3)
+        #expect(tail.pointCount > 10)
+
+        let before = tr.points.count
+        tr.stay(minutes: 30)
+        try store.insertPoints(Array(tr.points[before...]))
+        try engine.processNew(now: tr.t)
+        #expect(try engine.unresolvedTail(now: tr.t) == nil)         // arrived and resolved
+    }
+
+    @Test func progressWalksThroughThePhasesInOrder() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-10-01 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.penn, speed: 9, activity: .automotive)
+        tr.stay(minutes: 60)
+        let engine = InferenceEngine(store: try makeStore(tr))
+        var phases: [InferenceEngine.Phase] = []
+        var last: InferenceEngine.Progress?
+        engine.onProgress = { p in
+            if phases.last != p.phase { phases.append(p.phase) }
+            last = p
+        }
+        try engine.processNew(now: tr.t)
+        #expect(phases == [.loadingPoints, .detectingStays, .resolvingVisits, .buildingTrips, .finalizing])
+        #expect(last?.report.pointsConsidered ?? 0 > 0)
+        #expect(last?.staysTotal == 2 && last?.staysResolved == 2)
+    }
+}

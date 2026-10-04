@@ -318,9 +318,11 @@ public final class EditService {
 
     // MARK: - Split / insert
 
-    /// Split a trip by inserting a stop at `placeID` (or at the route position) between `stopStart` and `stopEnd`.
+    /// Split a trip by inserting a stop between `stopStart` and `stopEnd`, at `placeID`, else at `coordinate`
+    /// (picked on the map), else at the GPS position around `stopStart` — which can be far off inside a GPS gap.
     @discardableResult
-    public func splitTrip(_ tripID: String, stopStart: Date, stopEnd: Date, placeID: String? = nil) throws -> Visit {
+    public func splitTrip(_ tripID: String, stopStart: Date, stopEnd: Date, placeID: String? = nil,
+                          at coordinate: Coordinate? = nil) throws -> Visit {
         try db.transaction {
             var t = try tripOrThrow(tripID)
             guard stopStart > t.departure, stopEnd < t.arrival, stopEnd >= stopStart else {
@@ -330,7 +332,7 @@ public final class EditService {
             let atStop = raw.filter { $0.timestamp >= stopStart && $0.timestamp <= stopEnd }.map(\.coordinate)
             let nearest = raw.min { abs($0.timestamp.timeIntervalSince(stopStart)) < abs($1.timestamp.timeIntervalSince(stopStart)) }
             let place = try placeID.flatMap(store.place)
-            let coord = place?.coordinate ?? Geo.centroid(atStop) ?? nearest?.coordinate
+            let coord = place?.coordinate ?? coordinate ?? Geo.centroid(atStop) ?? nearest?.coordinate
                 ?? t.route.dropFirst(t.route.count / 2).first ?? Coordinate(0, 0)
 
             var resolvedPlace = place

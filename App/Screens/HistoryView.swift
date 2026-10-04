@@ -20,6 +20,9 @@ struct HistoryView: View {
 
     var body: some View {
         List {
+            if model.isProcessing || model.inferenceFailure != nil {
+                Section { InferenceStatusBanner().toonRow(top: 8, bottom: 8) }
+            }
             Section {
                 WeekChart(days: months.flatMap(\.days), offset: $weekOffset).toonRow(top: 8, bottom: 10)
             }

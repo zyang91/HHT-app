@@ -112,6 +112,58 @@ struct EditExportTests {
         #expect(all.contains { $0.destinationVisitID == stop.id } && all.contains { $0.originVisitID == stop.id })
     }
 
+    // Issue #11: the split sheets crashed on open because their picker ranges were built from `Date()` defaults
+    // (now…a past departure). The defaults must be ordered and strictly inside the record for any record length.
+    @Test(arguments: [0.5, 5, 90, 3 * 3600] as [TimeInterval])
+    func splitDefaultsAreOrderedInsideTheRecord(span: TimeInterval) {
+        let a = Trajectory.date("2026-09-15 07:00"), d = a.addingTimeInterval(span)
+        for (dep, now) in [(Optional(d), Date()), (nil, d)] {   // past visit; still-open visit
+            let v = SplitTimes.visit(arrival: a, departure: dep, now: now)
+            #expect(a < v.leave && v.leave < v.back && v.back < d)
+            #expect(v.leave <= v.stopArrival && v.stopArrival <= v.stopDeparture && v.stopDeparture <= v.back)
+        }
+        let t = SplitTimes.trip(departure: a, arrival: d)
+        #expect(a < t.stopStart && t.stopStart <= t.stopEnd && t.stopEnd < d)
+        let picked = SplitTimes.tripStop(start: t.stopStart, end: t.stopStart, arrival: d)
+        #expect(picked.stopStart <= picked.stopEnd && picked.stopEnd < d)
+        #expect(ClosedRange<Date>.ordered(d, a) == d...d)
+    }
+
+    @Test func splitDefaultsAreAcceptedByEditService() throws {
+        let (store, _) = try processed(chainDay())
+        let edit = EditService(store: store)
+        let lunch = try edit.createPlace(forVisit: try store.allVisits()[2].id, name: "Lunch", category: nil)
+
+        // "I left and came back", via a stop, on an inferred visit
+        let penn = try store.allVisits()[1]
+        let v = SplitTimes.visit(arrival: penn.arrival, departure: penn.departure)
+        let created = try edit.splitVisit(penn.id, leave: v.leave, back: v.back,
+                                          stop: (lunch.id, v.stopArrival, v.stopDeparture), mode: .walk)
+        #expect(created.count == 2)
+
+        // "I stopped somewhere" on a user-edited (locked) trip, with the picker's zero-length stop padded
+        var trip = try store.allTrips()[0]
+        try edit.setTripMode(trip.id, .bicycle)
+        trip = try #require(try store.trip(trip.id))
+        let t = SplitTimes.trip(departure: trip.departure, arrival: trip.arrival)
+        let s = SplitTimes.tripStop(start: t.stopStart, end: t.stopStart, arrival: trip.arrival)
+        let stop = try edit.splitTrip(trip.id, stopStart: s.stopStart, stopEnd: s.stopEnd)
+        let halves = try store.allTrips().filter { $0.destinationVisitID == stop.id || $0.originVisitID == stop.id }
+        #expect(halves.count == 2 && halves.allSatisfy { $0.mode == .bicycle && $0.departure < $0.arrival })
+    }
+
+    @Test func splitTripAtMapPin() throws {
+        let (store, _) = try processed(chainDay())
+        let edit = EditService(store: store)
+        let trip = try store.allTrips()[0]   // home → penn
+        let mid = trip.departure.addingTimeInterval(trip.duration / 2)
+        // A pin far from where GPS was at `mid` must win over the GPS guess.
+        let stop = try edit.splitTrip(trip.id, stopStart: mid, stopEnd: mid.addingTimeInterval(300), at: Philly.restaurant)
+        #expect(Geo.distance(stop.coordinate, Philly.restaurant) < 1)
+        let place = try #require(try store.place(stop.placeID!))
+        #expect(Geo.distance(place.coordinate, Philly.restaurant) < 50)
+    }
+
     @Test func correctionsPersistAcrossRestart() throws {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("hht-\(UUID().uuidString).sqlite").path
         defer { try? FileManager.default.removeItem(atPath: path) }
@@ -281,4 +333,96 @@ struct GeoAnalyticsTests {
         #expect(m.departuresByHour.reduce(0, +) == 4)
         #expect(m.topODPairs.count == 4)
     }
+
+    /// A corrected trip that departs before the incremental window still pins its destination visit:
+    /// dropping that auto visit used to hit the trips → visits foreign key.
+    @Test func lockedTripBeforeWindowPinsItsDestination() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        tr.move(to: Philly.penn, speed: 1.4, activity: .walking)
+        let (store, engine) = try processed(tr)
+        let grocery = try #require(try store.allVisits().last)
+        // an auto visit no detection supports, reached by a user-corrected trip that departs before it
+        let orphan = Visit(arrival: tr.t.addingTimeInterval(-300), departure: tr.t.addingTimeInterval(-120),
+                           coordinate: Philly.restaurant)
+        try store.upsertVisit(orphan)
+        let trip = Trip(originVisitID: grocery.id, destinationVisitID: orphan.id,
+                        departure: try #require(grocery.departure), arrival: orphan.arrival,
+                        distance: 1000, modeAuto: .walk, modeConfidence: 0.5, modeUser: .taxi, userStatus: .edited)
+        try store.upsertTrip(trip)
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        #expect(try store.visit(orphan.id) != nil)
+        #expect(try store.allTrips().first { $0.id == trip.id }?.mode == .taxi)
+    }
+
+    /// "Still here" is an override: reprocessing must not close the visit again at the old detected end.
+    @Test func stillHereSurvivesReprocessing() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.penn, speed: 1.4, activity: .walking)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        let grocery = try #require(try store.allVisits().first { Geo.distance($0.coordinate, Philly.grocery) < 100 })
+        #expect(grocery.departure != nil)
+        try edit.setVisitTimes(grocery.id, arrival: grocery.arrival, departure: nil)
+        try engine.process(from: .distantPast, to: tr.t, now: tr.t.addingTimeInterval(60))
+        #expect(try store.visit(grocery.id)?.departure == nil)
+    }
+
+    /// A pinned, still-open visit must not swallow a later stay somewhere else.
+    @Test func openLockedVisitClosesWhenYouShowUpElsewhere() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 10)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        try edit.setTripMode(try #require(try store.allTrips().last).id, .subway)   // pins the open grocery visit
+        let grocery = try #require(try store.allVisits().last)
+        #expect(grocery.departure == nil)
+        let leave = tr.t
+        tr.move(to: Philly.penn, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        try store.insertPoints(tr.points.filter { $0.timestamp > (store.lastPoint()?.timestamp ?? .distantPast) })
+        try store.insertMotion(tr.motion.filter { $0.timestamp > leave })
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        let dep = try #require(try store.visit(grocery.id)?.departure)
+        #expect(abs(dep.timeIntervalSince(leave)) < 120)
+        let visits = try store.allVisits()
+        #expect(visits.count == 3)
+        #expect(Geo.distance(visits[2].coordinate, Philly.penn) < 100)
+        #expect(try store.allTrips().count == 2)
+    }
+
+    /// Deleting a stop while it is still open must not suppress every later stay (Atlanta, Oct 1).
+    @Test func deletedOpenVisitDoesNotSwallowLaterStays() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-09-15 07:00"), at: Philly.home)
+        tr.stay(minutes: 60)
+        tr.move(to: Philly.grocery, speed: 8, activity: .automotive)
+        tr.stay(minutes: 20)
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        let grocery = try #require(try store.allVisits().last)
+        #expect(grocery.departure == nil)
+        try edit.deleteVisit(grocery.id)
+        let leave = tr.t
+        tr.move(to: Philly.penn, speed: 8, activity: .automotive)
+        tr.stay(minutes: 30)
+        tr.move(to: Philly.restaurant, speed: 1.3, activity: .walking)
+        tr.stay(minutes: 30)
+        try store.insertPoints(tr.points.filter { $0.timestamp > (store.lastPoint()?.timestamp ?? .distantPast) })
+        try store.insertMotion(tr.motion.filter { $0.timestamp > leave })
+        try engine.processNew(now: tr.t.addingTimeInterval(60))
+        let visits = try store.allVisits()
+        #expect(visits.count == 3)
+        #expect(!visits.contains { Geo.distance($0.coordinate, Philly.grocery) < 100 })
+        #expect(Geo.distance(visits[1].coordinate, Philly.penn) < 100)
+        #expect(Geo.distance(visits[2].coordinate, Philly.restaurant) < 100)
+        #expect(try store.visit(grocery.id)?.deleted == true)
+    }
 }
+

@@ -218,23 +218,33 @@ struct SplitVisitSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let visit: Visit
-    @State private var leave = Date()
-    @State private var back = Date()
+    // Seeded in init, not onAppear: the picker ranges below are built on first render and trap if inverted.
+    @State private var leave: Date
+    @State private var back: Date
     @State private var withStop = false
     @State private var stopPlaceID: String?
-    @State private var stopArrive = Date()
-    @State private var stopLeave = Date()
+    @State private var stopArrive: Date
+    @State private var stopLeave: Date
     @State private var mode: TravelMode = .walk
     @State private var places: [Place] = []
+    private let upper: Date
 
-    private var upper: Date { visit.departure ?? Date() }
+    init(visit: Visit) {
+        self.visit = visit
+        upper = max(visit.arrival, visit.departure ?? Date())
+        let t = SplitTimes.visit(arrival: visit.arrival, departure: visit.departure)
+        _leave = State(initialValue: t.leave)
+        _back = State(initialValue: t.back)
+        _stopArrive = State(initialValue: t.stopArrival)
+        _stopLeave = State(initialValue: t.stopDeparture)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    DatePicker("Left", selection: $leave, in: visit.arrival...upper)
-                    DatePicker("Came back", selection: $back, in: leave...upper)
+                    DatePicker("Left", selection: $leave, in: .ordered(visit.arrival, upper))
+                    DatePicker("Came back", selection: $back, in: .ordered(leave, upper))
                     Picker("Mode", selection: $mode) {
                         ForEach(TravelMode.allCases) { m in Label(m.label, systemImage: m.symbol).tag(m) }
                     }
@@ -246,8 +256,8 @@ struct SplitVisitSheet: View {
                             Text("Choose…").tag(String?.none)
                             ForEach(places) { p in Text(p.displayName).tag(String?.some(p.id)) }
                         }
-                        DatePicker("Arrived there", selection: $stopArrive, in: leave...back)
-                        DatePicker("Left there", selection: $stopLeave, in: stopArrive...back)
+                        DatePicker("Arrived there", selection: $stopArrive, in: .ordered(leave, back))
+                        DatePicker("Left there", selection: $stopLeave, in: .ordered(stopArrive, back))
                     }
                 } footer: {
                     Text("Creates the missing trip(s). Places must exist already — create one from any visit or in Places.")
@@ -268,12 +278,11 @@ struct SplitVisitSheet: View {
                     .disabled(withStop && stopPlaceID == nil)
                 }
             }
+            // Keep leave ≤ stop arrival ≤ stop departure ≤ back as the user drags earlier times later.
+            .onChange(of: leave) { _, v in back = max(back, v); stopArrive = max(stopArrive, v) }
+            .onChange(of: back) { _, v in stopLeave = min(stopLeave, v); stopArrive = min(stopArrive, v) }
+            .onChange(of: stopArrive) { _, v in stopLeave = max(stopLeave, v) }
             .onAppear {
-                let mid = visit.arrival.addingTimeInterval(upper.timeIntervalSince(visit.arrival) / 2)
-                leave = mid
-                back = min(upper.addingTimeInterval(-60), mid.addingTimeInterval(1800))
-                stopArrive = leave.addingTimeInterval(600)
-                stopLeave = back.addingTimeInterval(-600)
                 places = ((try? model.store.places()) ?? []).filter(\.isNamed)
             }
         }
