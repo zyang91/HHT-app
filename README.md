@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white" alt="Swift / SwiftUI">
   <img src="https://img.shields.io/badge/data-local--first-5ac8a0" alt="Local-first data">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 license"></a>
-  <a href="https://zhanchaoyang.com/HHT-app/"><img src="https://img.shields.io/badge/docs-website-f4a93b" alt="Docs website"></a>
+  <a href="https://zhanchaoyang.com/HHT-app/docs/"><img src="https://img.shields.io/badge/docs-website-f4a93b" alt="Documentation"></a>
 </p>
 
 <p align="center">
@@ -26,7 +26,8 @@
   <a href="#daily-use">Daily use</a> ·
   <a href="#research-workflow">Research workflow</a> ·
   <a href="#development">Development</a> ·
-  <a href="https://zhanchaoyang.com/HHT-app/">Docs</a>
+  <a href="https://zhanchaoyang.com/HHT-app/docs/">Docs</a> ·
+  <a href="https://zhanchaoyang.com/HHT-app/">Project story</a>
 </p>
 
 ---
@@ -48,7 +49,7 @@ Packages/HHTCore/       platform-independent core (Swift package, no dependencie
   Export/               CSV/JSON/GeoJSON/SQLite export; CSV/GPX/airport import
   Tests/                29 tests incl. the brief's 14 synthetic scenarios
 analysis/               Python loader + example analysis (pandas)
-docs/                   data-model, inference, collection, analytics, privacy, import formats
+docs/                   project page (index.html), documentation site (docs/), markdown specs
 project.yml             XcodeGen spec (HHT.xcodeproj is generated from it)
 ```
 
