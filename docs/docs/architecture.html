@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/docs.css">
+<link rel="stylesheet" href="assets/docs.css?v=6">
 <script>try { const t = localStorage.getItem('hht-docs-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <script src="assets/docs.js" defer></script>
 </head>
@@ -23,12 +23,15 @@
 tested without a phone.</p>
 
 <h2>Data flow</h2>
-<div class="flow">
-  <div class="node"><b>Sensors</b><span>CoreLocation fixes, CLVisit events, CoreMotion activity</span></div>
-  <div class="node"><b>Raw tables</b><span>Append-only, never edited</span></div>
-  <div class="node hl"><b>Inference</b><span>Stays → places → trips → mode segments</span></div>
-  <div class="node"><b>Diary</b><span>Visits &amp; trips you review and correct</span></div>
-  <div class="node"><b>Outputs</b><span>Stats, map, CSV / JSON / GeoJSON / SQLite</span></div>
+<div class="metro" role="img" aria-label="Data flow: sensors, raw tables, inference, diary, outputs">
+  <div class="line-name"><i>H</i>The HHT Line · from sensors to spreadsheets</div>
+  <ol>
+    <li style="--seg:#5c9bff"><span class="stn"></span><b>Sensors</b><span class="d">CoreLocation fixes, CLVisit events, CoreMotion activity</span></li>
+    <li style="--seg:#8bdb5e"><span class="stn"></span><b>Raw tables</b><span class="d">Append-only, never edited</span><span class="tag" style="--chip:#5c9bff">read-only</span></li>
+    <li class="interchange" style="--seg:#ffc93c"><span class="stn"></span><b>Inference</b><span class="d">Stays → places → trips → mode segments</span><span class="tag" style="--chip:#ff6b4a">interchange</span></li>
+    <li style="--seg:#ff7eb3"><span class="stn"></span><b>Diary</b><span class="d">Visits &amp; trips you review and correct</span><span class="tag" style="--chip:#ffc93c">you edit here</span></li>
+    <li><span class="stn"></span><b>Outputs</b><span class="d">Stats, map, CSV / JSON / GeoJSON / SQLite</span><span class="tag" style="--chip:#ff7eb3">terminus</span></li>
+  </ol>
 </div>
 <p>The collector writes every fix to SQLite immediately. Inference runs on launch, when the app comes to the foreground,
 when the collector decides you've stopped, and from a background refresh task. It is deterministic: the same raw data and

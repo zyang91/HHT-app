@@ -19,6 +19,9 @@ const NAV = [
     { href: 'api.html', title: 'Developer API' },
     { href: 'contributing.html', title: 'Contributing' },
   ] },
+  { group: 'About', items: [
+    { href: 'developer.html', title: 'Meet the developer' },
+  ] },
   { group: 'Links', items: [
     { href: '../', title: 'Project story', ext: true },
     { href: 'https://github.com/zyang91/HHT-app', title: 'GitHub', ext: true },
