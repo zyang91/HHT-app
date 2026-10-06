@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HHT Documentation</title>
+<meta name="description" content="Documentation for HHT, a free, open-source, local-first iOS app that runs a continuous household travel survey for one person.">
+<link rel="icon" href="../assets/hht-logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+<script>try { const t = localStorage.getItem('hht-docs-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script src="assets/docs.js" defer></script>
+</head>
+<body>
+<main class="dx-main"><article class="dx-content">
+
+<div class="hero">
+  <div>
+    <p class="eyebrow">Documentation</p>
+    <h1>HHT: a travel survey for one person</h1>
+  </div>
+  <img class="logo" src="../assets/hht-logo.png" alt="HHT logo">
+</div>
+<p class="lede">HHT is a free, open-source iOS app that records where you go, rebuilds each day into
+visits, trips and travel modes, and keeps all of it on your phone. Think of it as a household travel survey
+that fills itself in, with a sample size of one.</p>
+
+<div class="actions">
+  <a class="btn primary" href="installation.html">Install on your iPhone →</a>
+  <a class="btn" href="architecture.html">How it's built</a>
+  <a class="btn" href="https://github.com/zyang91/HHT-app">View on GitHub</a>
+</div>
+
+<h2>Why this app exists</h2>
+<p>Location history is one of the most revealing datasets a person produces. Most apps that collect it
+are run by companies or individual developers who either charge a subscription, upload your movements to their
+servers, or both. Once the data is on someone else's server, you are trusting their business model,
+their security, and whatever they decide to do with it later.</p>
+<p>HHT takes the opposite position:</p>
+
+<div class="pillars">
+  <div><b>Free and open source</b><span>Apache 2.0. No subscription, no paid tier, no ads. Read every line that touches your data.</span></div>
+  <div><b>Nothing goes to a cloud</b><span>No account, no server, no analytics SDK, no sync. The database is one SQLite file in the app's sandbox.</span></div>
+  <div><b>Built for one person</b><span>A personal tool, not a platform. You install it yourself from source and you own the output.</span></div>
+  <div><b>Research-grade output</b><span>Trips follow household-travel-survey (HHTS) conventions and export to CSV, JSON, GeoJSON and SQLite.</span></div>
+</div>
+
+<p>The design comes from transportation research. A household travel survey asks people to keep a one- or two-day
+diary of every trip: where they started, where they went, when, by what mode, and why. Those diaries are expensive,
+short, and depend on memory. HHT keeps the same diary continuously, from GPS and motion sensors, and lets you correct
+it in a tap or two.</p>
+
+<h2>What it does</h2>
+<div class="cards">
+  <div class="card"><div class="k">collect</div><h3>Background recording</h3><p>GPS runs only while you are moving. When you stop, it switches to a geofence to save battery.</p></div>
+  <div class="card"><div class="k">reconstruct</div><h3>Visits, trips and modes</h3><p>A deterministic engine turns raw fixes into stays, trips, mode segments and named places.</p></div>
+  <div class="card"><div class="k">correct</div><h3>One-tap fixes</h3><p>Change a mode, rename a place, split or merge. Corrections are locked and survive rebuilds.</p></div>
+  <div class="card"><div class="k">analyse</div><h3>Stats and export</h3><p>Mode share, radius of gyration, tours, flights. Export everything for pandas, R, DuckDB or QGIS.</p></div>
+</div>
+
+<h2>Who it's for</h2>
+<ul>
+  <li><b>Anyone who wants a private travel diary</b> without handing their location history to a company.</li>
+  <li><b>Transportation and urban researchers</b> who want clean, HHTS-style data about their own travel, or a reference
+    implementation of trip reconstruction.</li>
+  <li><b>iOS and Swift developers</b> curious about long-running background location, or wanting to fork the app and extend it.</li>
+</ul>
+
+<div class="callout note"><div class="ic">i</div>
+<p>HHT is not on the App Store. You build it from source with Xcode and install it on your own phone. With a free Apple ID
+the install lasts 7 days and you renew it with one command, and your data is kept between installs. See <a href="installation.html">Installation</a>.</p></div>
+
+<h2>Where to go next</h2>
+<div class="cards">
+  <a class="card" href="installation.html"><div class="k">01</div><h3>Installation</h3><p>Build, sign and install on your iPhone.</p></a>
+  <a class="card" href="using-the-app.html"><div class="k">02</div><h3>Using the app</h3><p>The screens, daily routine, corrections and export.</p></a>
+  <a class="card" href="architecture.html"><div class="k">03</div><h3>Architecture</h3><p>Modules, data flow, and the three data layers.</p></a>
+  <a class="card" href="api.html"><div class="k">04</div><h3>Developer API</h3><p>HHTCore (Swift) and the Python analysis helpers.</p></a>
+</div>
+
+</article></main>
+</body>
+</html>
