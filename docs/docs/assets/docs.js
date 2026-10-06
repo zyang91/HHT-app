@@ -7,6 +7,7 @@ const NAV = [
     { href: 'index.html', title: 'Overview' },
     { href: 'installation.html', title: 'Installation' },
     { href: 'using-the-app.html', title: 'Using the app' },
+    { href: 'ui-guide.html', title: 'UI guide' },
   ] },
   { group: 'Concepts', items: [
     { href: 'architecture.html', title: 'Architecture' },
