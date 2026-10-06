@@ -358,3 +358,206 @@ td code { white-space: nowrap; }
   .pager .next { grid-column: 1; }
   .api-head .file { margin-left: 0; width: 100%; }
 }
+
+/* ── App UI: phone frames and screenshots ───────────────── */
+.phone {
+  position: relative; margin: 0;
+  border-radius: 34px; padding: 7px;
+  background: #121214; border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+}
+.phone img { display: block; width: 100%; height: auto; border-radius: 28px; aspect-ratio: 600 / 1304; object-fit: cover; }
+.phone figcaption { position: absolute; left: 0; right: 0; bottom: -30px; text-align: center; font-size: 12.5px; color: var(--ink-faint); }
+
+.showcase {
+  position: relative; display: grid; grid-template-columns: 1fr 1.18fr 1fr; gap: 18px; align-items: center;
+  padding: 36px 28px 56px; margin: 0 0 32px; border-radius: 20px; overflow: hidden;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(34, 25, 58, .13) 1px, transparent 0) 0 0 / 16px 16px,
+    linear-gradient(160deg, #fff3d6, #ffe4c2);
+  border: 1px solid var(--line);
+}
+.showcase .phone:nth-child(1) { transform: rotate(-4deg) translateY(14px); }
+.showcase .phone:nth-child(3) { transform: rotate(4deg) translateY(14px); }
+.showcase .phone figcaption { color: #5b5270; font-weight: 500; }
+
+.gallery { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px 14px; margin: 0 0 48px; }
+.gallery .phone { border-radius: 22px; padding: 5px; }
+.gallery .phone img { border-radius: 18px; }
+.gallery a { color: inherit; }
+.gallery a:hover { text-decoration: none; }
+.gallery a:hover .phone { transform: translateY(-2px); }
+.gallery .phone { transition: transform .15s; }
+
+.screen { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 32px; align-items: start; margin: 8px 0 12px; }
+.screen .phone { position: sticky; top: calc(var(--header-h) + 20px); }
+.screen ol.callouts { list-style: none; padding: 0 !important; margin: 0; counter-reset: c; }
+.screen ol.callouts li { position: relative; padding: 0 0 12px 36px; margin: 0; }
+.screen ol.callouts li::before {
+  counter-increment: c; content: counter(c);
+  position: absolute; left: 0; top: 2px; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center; font: 700 12px var(--sans);
+  background: #ff6b4a; color: #22193a; border: 2px solid #22193a;
+}
+.screen ol.callouts b { display: block; }
+
+/* Sticker components re-created from App/Support/Theme.swift (the "Toon" design system). */
+.toon-stage {
+  display: flex; flex-wrap: wrap; gap: 14px 16px; align-items: center;
+  padding: 22px 20px 26px; margin: 0 0 22px; border-radius: 16px;
+  background: radial-gradient(circle at 1px 1px, rgba(34, 25, 58, .12) 1px, transparent 0) 0 0 / 14px 14px, #fff3d6;
+  border: 1px solid var(--line); color: #22193a;
+  font-family: ui-rounded, 'SF Pro Rounded', 'Nunito', var(--sans);
+}
+.toon {
+  --fill: #fff;
+  background: var(--fill); color: #22193a;
+  border: 2.5px solid #22193a; border-radius: 18px;
+  box-shadow: 4px 4px 0 #22193a;
+  font-weight: 800;
+}
+.toon.dashed { border-style: dashed; box-shadow: none; background: #fff8e6; }
+.toon-stat { padding: 10px 16px 9px; min-width: 120px; line-height: 1.1; }
+.toon-stat big { display: block; font-size: 26px; }
+.toon-stat small { font-size: 13px; }
+.toon-pill { padding: 6px 16px; border-radius: 999px; font-size: 14px; box-shadow: 2.5px 2.5px 0 #22193a; }
+.toon-pill.dark { background: #22193a; color: #fff; }
+.toon-badge { display: inline-block; padding: 1px 9px; border: 2px solid #22193a; border-radius: 999px; font: 800 12px/1.4 inherit; font-family: inherit; }
+.toon-chip { width: 38px; height: 38px; border-radius: 12px; display: inline-grid; place-items: center; border: 2.5px solid #22193a; font-size: 18px; }
+.toon-tabbar { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; }
+.toon-tabbar span { width: 38px; height: 34px; display: grid; place-items: center; font-size: 16px; }
+.toon-tabbar span.on { width: auto; padding: 0 16px; border-radius: 999px; background: #ff6b4a; border: 2.5px solid #22193a; font-size: 14px; gap: 6px; }
+.toon-bubble { display: flex; align-items: center; gap: 12px; }
+.toon-bubble .pin { width: 34px; height: 42px; position: relative; flex: none; }
+.toon-bubble .pin::before { content: ""; position: absolute; inset: 0 0 8px 0; background: #ff6b4a; border: 2.5px solid #22193a; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+.toon-bubble .say { padding: 9px 14px; font-size: 14.5px; font-weight: 700; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 0 0 22px; }
+.swatch { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg-elev); font-size: 12.5px; }
+.swatch i { display: block; height: 46px; border-bottom: 1px solid var(--line); }
+.swatch div { padding: 7px 10px; line-height: 1.35; }
+.swatch code { background: none; border: 0; padding: 0; font-size: 11.5px; color: var(--ink-faint); }
+
+@media (max-width: 880px) {
+  .showcase { grid-template-columns: 1fr 1fr; padding: 24px 16px 48px; }
+  .showcase .phone:nth-child(1) { display: none; }
+  .showcase .phone:nth-child(3) { transform: rotate(3deg); }
+  .gallery { grid-template-columns: repeat(5, 140px); overflow-x: auto; padding: 4px 4px 34px; margin-bottom: 24px; }
+  .screen { grid-template-columns: minmax(0, 1fr); }
+  .screen .phone { position: static; max-width: 230px; margin: 0 auto 36px; }
+}
+
+/* ── Docs home: cards drawn as the app's stickers (Toon in App/Support/Theme.swift) ── */
+.home {
+  --t-ink: #22193a;
+  --t-shadow: #22193a;
+  --t-paper: #ffffff;
+  --t-muted: #5b5270;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .home { --t-shadow: #ff6b4a; --t-paper: #fff8e6; }
+}
+:root[data-theme="dark"] .home { --t-shadow: #ff6b4a; --t-paper: #fff8e6; }
+
+.home .pillars {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px; background: none; border: 0; border-radius: 0; overflow: visible; padding: 2px 6px 6px 0;
+}
+.home .pillars > div,
+.home .toon-grid .card {
+  background: var(--fill, var(--t-paper)); color: var(--t-ink);
+  border: 2.5px solid var(--t-ink); border-radius: 20px;
+  box-shadow: 4px 4px 0 var(--t-shadow);
+  font-family: ui-rounded, 'SF Pro Rounded', var(--sans);
+}
+.home .pillars > div { padding: 18px 20px; }
+.home .pillars > div:nth-child(1) { --fill: #ffc93c; transform: rotate(-.6deg); }
+.home .pillars > div:nth-child(2) { --fill: #8bdb5e; transform: rotate(.5deg); }
+.home .pillars > div:nth-child(3) { --fill: #5c9bff; transform: rotate(.4deg); }
+.home .pillars > div:nth-child(4) { --fill: #ff7eb3; transform: rotate(-.5deg); }
+.home .pillars b { font-size: 16.5px; font-weight: 800; }
+.home .pillars span { color: var(--t-ink); opacity: .82; }
+
+.home .toon-grid { gap: 18px; padding: 2px 6px 6px 0; }
+.home .toon-grid .card { padding: 18px 18px 16px; transition: transform .12s, box-shadow .12s; }
+.home .toon-grid .card h3 { font-weight: 800 !important; }
+.home .toon-grid .card p { color: var(--t-muted) !important; }
+.home .toon-grid .card .k {
+  display: inline-block; margin-bottom: 10px;
+  font: 800 12px/1.5 ui-rounded, 'SF Pro Rounded', var(--sans); letter-spacing: .02em;
+  color: var(--t-ink); background: var(--chip, #ffc93c);
+  border: 2px solid var(--t-ink); border-radius: 999px; padding: 0 10px;
+}
+.home .toon-grid .card:nth-child(5n+1) { --chip: #ffc93c; }
+.home .toon-grid .card:nth-child(5n+2) { --chip: #8bdb5e; }
+.home .toon-grid .card:nth-child(5n+3) { --chip: #5c9bff; }
+.home .toon-grid .card:nth-child(5n+4) { --chip: #ff7eb3; }
+.home .toon-grid .card:nth-child(5n+5) { --chip: #b596ff; }
+/* Links press onto their shadow, like ToonButtonStyle. */
+.home a.card:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--t-shadow); border-color: var(--t-ink); }
+.home a.card:active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--t-shadow); }
+
+@media (max-width: 880px) {
+  .home .pillars { grid-template-columns: minmax(0, 1fr); }
+}
+.home .toon-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .home .toon-grid.two { grid-template-columns: minmax(0, 1fr); } }
+/* "What it does": coloured stickers like the pillars above. */
+.home .toon-grid.two .card:nth-child(1) { --fill: #ff9a4d; transform: rotate(.5deg); }
+.home .toon-grid.two .card:nth-child(2) { --fill: #5fd3b0; transform: rotate(-.6deg); }
+.home .toon-grid.two .card:nth-child(3) { --fill: #b596ff; transform: rotate(-.4deg); }
+.home .toon-grid.two .card:nth-child(4) { --fill: #6fd6e8; transform: rotate(.5deg); }
+.home .toon-grid.two .card { --chip: #ffffff; }
+.home .toon-grid.two .card p { color: var(--t-ink) !important; opacity: .82; }
+
+/* "Where to go next": the docs as a day in the app's diary — stops (pages) joined by trips (reading time). */
+.home .route { list-style: none; padding: 0 !important; margin: 18px 0 8px; max-width: 600px; position: relative; }
+.home .route li { margin: 0; }
+.home .route .stop a {
+  display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 16px; align-items: center;
+  color: var(--t-ink); text-decoration: none;
+}
+.home .route .pin {
+  width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--t-paper); border: 2.5px solid var(--t-ink); box-shadow: 3px 3px 0 var(--t-shadow);
+  font: 800 18px ui-rounded, 'SF Pro Rounded', var(--sans); color: var(--t-ink);
+  position: relative; z-index: 1;
+}
+.home .route .body {
+  display: block; padding: 13px 18px; border-radius: 20px;
+  background: var(--fill); border: 2.5px solid var(--t-ink); box-shadow: 4px 4px 0 var(--t-shadow);
+  font-family: ui-rounded, 'SF Pro Rounded', var(--sans);
+  transition: transform .12s, box-shadow .12s;
+}
+.home .route .body b { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16.5px; font-weight: 800; }
+.home .route .body small { display: block; font-size: 14px; opacity: .82; margin-top: 2px; }
+.home .route .body .toon-badge { font-size: 11px; color: var(--t-ink); }
+.home .route .go {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--t-paper); border: 2.5px solid var(--t-ink); box-shadow: 2.5px 2.5px 0 var(--t-shadow);
+  font-weight: 800; color: var(--t-ink); transition: transform .12s, box-shadow .12s, background .12s;
+}
+.home .route .stop:nth-child(4n+1) .body { transform: rotate(-.4deg); }
+.home .route .stop:nth-child(4n+3) .body { transform: rotate(.4deg); }
+.home .route .stop a:hover .body { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--t-shadow); }
+.home .route .stop a:hover .go { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--t-shadow); background: #ff6b4a; }
+.home .route .stop a:active .body { transform: translate(4px, 4px); box-shadow: none; }
+/* the trail between stops */
+.home .route .leg {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  min-height: 58px; padding-left: 62px;
+  font: 700 13.5px ui-rounded, 'SF Pro Rounded', var(--sans); color: var(--ink-soft);
+}
+.home .route .leg::before {
+  content: ""; position: absolute; left: 21px; top: 4px; bottom: 4px;
+  border-left: 4px dotted var(--ink-faint);
+}
+.home .route .leg .toon-chip { width: 32px; height: 32px; font-size: 15px; border-radius: 10px; border-color: var(--t-ink); }
+
+@media (max-width: 560px) {
+  .home .route .stop a { grid-template-columns: 40px minmax(0, 1fr); gap: 12px; }
+  .home .route .pin { width: 40px; height: 40px; }
+  .home .route .go { display: none; }
+  .home .route .leg { padding-left: 54px; }
+  .home .route .leg::before { left: 18px; }
+}
