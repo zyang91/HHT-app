@@ -9,3 +9,4 @@ analysis/.venv/
 __pycache__/
 *.sqlite
 .build-xcode/
+.claude/launch.json
