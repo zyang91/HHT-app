@@ -77,6 +77,38 @@ struct EditExportTests {
         #expect(remaining[1].originVisitID == trips[1].originVisitID)       // relinked to surviving visit
     }
 
+    @Test func deletePlaceRemovesItsVisitsAndStaysDeleted() throws {
+        let tr = chainDay()
+        let (store, engine) = try processed(tr)
+        let edit = EditService(store: store)
+        let visits = try store.allVisits()
+        let penn = try #require(visits[1].placeID)
+        #expect(visits[3].placeID == penn)
+        #expect(try store.places().count == 3)
+        try edit.deletePlace(penn)
+        #expect(try store.places().map(\.id).contains(penn) == false)
+        #expect(try store.place(penn)?.deleted == true)                     // soft delete, still in DB
+        #expect(try store.visits(atPlace: penn).isEmpty)
+        // home → restaurant → home, trips joined across both penn stops
+        #expect(try store.allVisits().map(\.id) == [visits[0].id, visits[2].id, visits[4].id])
+        #expect(try store.allTrips().count == 2)
+        #expect(try store.matchPlace(Philly.penn) == nil)
+        #expect(throws: EditError.self) { try edit.setVisitPlace(visits[2].id, placeID: penn) }
+        #expect(throws: EditError.self) { try edit.deletePlace(penn) }
+        #expect(try store.auditLog(entityID: penn).contains { $0.action == "delete" && $0.newValue == "2" })
+        // reprocessing must not resurrect the place or its stops
+        try engine.process(from: .distantPast, to: tr.t, now: tr.t.addingTimeInterval(60))
+        #expect(try store.allVisits().count == 3)
+        #expect(try store.allTrips().count == 2)
+        #expect(try store.places().count == 2)
+        // the export leaves it out too
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hht-delplace-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = try Exporter(store: store).exportBundle(to: dir)
+        let csv = try String(contentsOf: folder.appendingPathComponent("places.csv"), encoding: .utf8)
+        #expect(!csv.contains(penn))
+    }
+
     @Test func namedPlaceRecognisedAgain() throws {
         var tr = chainDay()
         let (store, engine) = try processed(tr)
@@ -179,7 +211,7 @@ struct EditExportTests {
         let reopened = try TravelStore(path: path)
         #expect(try reopened.trip(tripID)?.mode == .ebike)
         #expect(try reopened.allVisits()[2].purpose == .meal)
-        #expect(reopened.schemaVersion == 1)
+        #expect(reopened.schemaVersion == Schema.migrations.count)
     }
 
     @Test func personalisedModeFromCorrections() throws {

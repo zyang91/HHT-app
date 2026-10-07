@@ -57,7 +57,7 @@ public final class Importer {
     /// Find or create the Place for an airport code (category airport).
     public func airportPlace(_ code: String) throws -> Place? {
         let c = code.uppercased()
-        if let r = try store.db.query("SELECT * FROM places WHERE code = ? AND merged_into IS NULL LIMIT 1", c).first {
+        if let r = try store.db.query("SELECT * FROM places WHERE code = ? AND merged_into IS NULL AND deleted = 0 LIMIT 1", c).first {
             return TravelStore.place(r)
         }
         guard let a = airport(c) else { return nil }

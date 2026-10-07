@@ -42,11 +42,13 @@ CoreMotion activity episodes: `ts` (start), `activity` (`stationary|walking|runn
 `confidence` (0 low, 1 medium, 2 high). An activity lasts until the next row.
 
 ### places
-`id, name, lat, lon, radius_m, address, city, region, country, category, code, favorite, notes, source, merged_into, created_at, updated_at`
+`id, name, lat, lon, radius_m, address, city, region, country, category, code, favorite, notes, source, merged_into, deleted, created_at, updated_at`
 
 - `category`: `home, work_school, restaurant, cafe, grocery, shopping, recreation, entertainment, airport, rail_station, transit_station, hotel, friend_family, medical, other`.
 - `code`: IATA/station code. `source`: `inferred | manual | imported_csv`.
 - `merged_into`: set when the user merges duplicates (the row stays as a tombstone; all visits point to the target).
+- `deleted`: soft delete (schema v2) when the user deletes a place that isn't real; its visits are soft-deleted too
+  and the trips around them joined, as for "this wasn't a stop".
 - First/last visit, visit count and dwell are derived (see `places.csv` export or `placeStats()`).
 
 ### visits  (activities / stays)

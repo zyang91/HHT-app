@@ -22,6 +22,7 @@ struct PlacesView: View {
     @State private var query = ""
     @State private var sort: Sort = .time
     @State private var namedOnly = false
+    @State private var pendingDelete: Place?
 
     private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
     private let tilts: [Double] = [-1.5, 1.5, 1, -1, -1, 1.5]
@@ -58,6 +59,7 @@ struct PlacesView: View {
                                 PlaceTile(place: p, stats: stats[p.id]).tilt(tilts[i % tilts.count])
                             }
                             .buttonStyle(.plain)
+                            .contextMenu { deleteButton(p) }
                         }
                     }
                     .padding(.vertical, 4)
@@ -69,6 +71,7 @@ struct PlacesView: View {
                             UnnamedPlaceRow(place: p, stats: stats[p.id])
                         }
                         .buttonStyle(.plain)
+                        .contextMenu { deleteButton(p) }
                     }
                 }
             }
@@ -78,10 +81,21 @@ struct PlacesView: View {
         .scrollDismissesKeyboard(.immediately)
         .background(ToonBackground())
         .navigationTitle("Places")
+        .confirmationDialog("Delete \(pendingDelete.flatMap { $0.isNamed ? $0.displayName : nil } ?? "this place")?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible, presenting: pendingDelete) { p in
+            Button("Delete place and its \(visitWord(stats[p.id]?.visitCount ?? 0))", role: .destructive) {
+                model.perform { try model.edit.deletePlace(p.id) }
+            }
+        } message: { _ in Text(PlaceDeletion.explanation) }
         .task(id: model.revision) {
             places = (try? model.store.places()) ?? []
             stats = (try? model.store.placeStats()) ?? [:]
         }
+    }
+
+    private func deleteButton(_ p: Place) -> some View {
+        Button(role: .destructive) { pendingDelete = p } label: { Label("Delete place", systemImage: "trash") }
     }
 
     private var searchField: some View {
@@ -199,6 +213,7 @@ struct PlaceDetailView: View {
     @State private var mergeCandidates: [Place] = []
     @State private var showMerge = false
     @State private var radiusText = ""
+    @State private var confirmDelete = false
 
     var body: some View {
         Form {
@@ -245,6 +260,9 @@ struct PlaceDetailView: View {
                 Section {
                     Button { showMerge = true } label: { Label("Merge into another place…", systemImage: "arrow.triangle.merge") }
                 } footer: { Text("Use when the same real place was detected twice. All visits move; nothing is lost.") }
+                Section {
+                    Button(role: .destructive) { confirmDelete = true } label: { Label("This isn't a real place", systemImage: "trash") }
+                } footer: { Text("Deletes the place and its \(visitWord(visits.count)); trips around them are joined.") }
 
                 Section("\(visits.count) visits") {
                     ForEach(visits.prefix(100)) { v in
@@ -259,13 +277,19 @@ struct PlaceDetailView: View {
                     }
                 }
             } else {
-                Text("This place no longer exists (it may have been merged).")
+                Text("This place no longer exists (it may have been merged or deleted).")
             }
         }
         .toonBackground()
         .navigationTitle(place?.displayName ?? "Place")
         .inlineTitle()
         .task(id: model.revision) { load() }
+        .confirmationDialog("Delete this place?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete place and its \(visitWord(visits.count))", role: .destructive) {
+                model.perform { try model.edit.deletePlace(placeID) }
+                dismiss()
+            }
+        } message: { Text(PlaceDeletion.explanation) }
         .sheet(isPresented: $showMerge) {
             NavigationStack {
                 List(mergeCandidates) { c in
@@ -288,7 +312,7 @@ struct PlaceDetailView: View {
 
     private func load() {
         place = try? model.store.place(placeID)
-        if place?.mergedInto != nil { place = nil }
+        if place?.mergedInto != nil || place?.deleted == true { place = nil }
         draft = place
         visits = (try? model.store.visits(atPlace: placeID)) ?? []
         if let p = place {
@@ -298,3 +322,10 @@ struct PlaceDetailView: View {
         }
     }
 }
+
+enum PlaceDeletion {
+    static let explanation = "Use this for spots that were never real stops (GPS noise, places you don't recognise). "
+        + "Visits there leave your diary and the trips before/after are joined. If it is the same place as another one, merge instead."
+}
+
+private func visitWord(_ n: Int) -> String { n == 1 ? "1 visit" : "\(n) visits" }

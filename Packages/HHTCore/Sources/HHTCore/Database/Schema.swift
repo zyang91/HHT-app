@@ -233,6 +233,10 @@ enum Schema {
         LEFT JOIN places dp ON dp.id = COALESCE(dv.place_id, t.destination_place_id)
         WHERE t.deleted = 0;
         """,
+        // v2 — places can be deleted by the user (soft delete, like visits and trips)
+        """
+        ALTER TABLE places ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
+        """,
     ]
 
     static func migrate(_ db: SQLiteConnection) throws {

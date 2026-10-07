@@ -111,7 +111,9 @@ def _load_sqlite(db: Path) -> HHT:
     seg = q("""SELECT s.id AS segment_id, s.trip_id, s.seq, s.start_ts, s.end_ts,
                       COALESCE(s.mode_user, s.mode_auto, 'unknown') AS mode, s.distance_m
                FROM trip_segments s JOIN trips t ON t.id = s.trip_id WHERE t.deleted = 0""")
-    places = q("SELECT id AS place_id, * FROM places WHERE merged_into IS NULL")
+    place_cols = {r[1] for r in con.execute("PRAGMA table_info(places)")}
+    places = q("SELECT id AS place_id, * FROM places WHERE merged_into IS NULL"
+               + (" AND deleted = 0" if "deleted" in place_cols else ""))  # schema v1 has no places.deleted
     pts = q("SELECT * FROM raw_location_points ORDER BY ts")
     pts["time_utc"] = pd.to_datetime(pts["ts"], unit="s", utc=True)
     out = HHT(trips, seg, visits, places, q("SELECT * FROM flights"), q("SELECT * FROM life_phases"),

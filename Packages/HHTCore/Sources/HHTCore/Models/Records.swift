@@ -64,18 +64,19 @@ public struct Place: Identifiable, Equatable, Hashable, Sendable {
     public var notes: String?
     public var source: RecordSource
     public var mergedInto: String?
+    public var deleted: Bool
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(id: String = newID(), name: String? = nil, coordinate: Coordinate, radius: Double = 100,
                 address: String? = nil, city: String? = nil, region: String? = nil, country: String? = nil,
                 category: PlaceCategory? = nil, code: String? = nil, favorite: Bool = false, notes: String? = nil,
-                source: RecordSource = .inferred, mergedInto: String? = nil,
+                source: RecordSource = .inferred, mergedInto: String? = nil, deleted: Bool = false,
                 createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id; self.name = name; self.coordinate = coordinate; self.radius = radius
         self.address = address; self.city = city; self.region = region; self.country = country
         self.category = category; self.code = code; self.favorite = favorite; self.notes = notes
-        self.source = source; self.mergedInto = mergedInto; self.createdAt = createdAt; self.updatedAt = updatedAt
+        self.source = source; self.mergedInto = mergedInto; self.deleted = deleted; self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 
     public var displayName: String {

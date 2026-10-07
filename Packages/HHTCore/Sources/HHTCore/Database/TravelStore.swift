@@ -110,23 +110,24 @@ public final class TravelStore: @unchecked Sendable {
     public func upsertPlace(_ p: Place) throws {
         try db.run("""
             INSERT INTO places(id, name, lat, lon, radius_m, address, city, region, country, category, code, favorite,
-                notes, source, merged_into, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                notes, source, merged_into, deleted, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET name=excluded.name, lat=excluded.lat, lon=excluded.lon,
                 radius_m=excluded.radius_m, address=excluded.address, city=excluded.city, region=excluded.region,
                 country=excluded.country, category=excluded.category, code=excluded.code, favorite=excluded.favorite,
-                notes=excluded.notes, source=excluded.source, merged_into=excluded.merged_into, updated_at=excluded.updated_at
+                notes=excluded.notes, source=excluded.source, merged_into=excluded.merged_into,
+                deleted=excluded.deleted, updated_at=excluded.updated_at
             """, p.id, p.name, p.coordinate.latitude, p.coordinate.longitude, p.radius, p.address, p.city, p.region,
             p.country, p.category?.rawValue, p.code, p.favorite, p.notes, p.source.rawValue, p.mergedInto,
-            p.createdAt, p.updatedAt)
+            p.deleted, p.createdAt, p.updatedAt)
     }
 
     public func place(_ id: String) throws -> Place? {
         try db.query("SELECT * FROM places WHERE id = ?", id).first.map(Self.place)
     }
 
-    /// Active (non-merged) places.
+    /// Active (non-merged, non-deleted) places.
     public func places() throws -> [Place] {
-        try db.query("SELECT * FROM places WHERE merged_into IS NULL ORDER BY name IS NULL, name COLLATE NOCASE").map(Self.place)
+        try db.query("SELECT * FROM places WHERE merged_into IS NULL AND deleted = 0 ORDER BY name IS NULL, name COLLATE NOCASE").map(Self.place)
     }
 
     /// Nearest active place whose radius (plus `slack`) contains the coordinate.
@@ -134,7 +135,7 @@ public final class TravelStore: @unchecked Sendable {
         // coarse bounding box prefilter (~2 km), exact test in Swift
         let dLat = 0.02, dLon = 0.02 / max(0.1, cos(c.latitude * .pi / 180))
         let candidates = try db.query("""
-            SELECT * FROM places WHERE merged_into IS NULL AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+            SELECT * FROM places WHERE merged_into IS NULL AND deleted = 0 AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
             """, c.latitude - dLat, c.latitude + dLat, c.longitude - dLon, c.longitude + dLon).map(Self.place)
         return candidates
             .map { ($0, Geo.distance($0.coordinate, c)) }
@@ -168,7 +169,7 @@ public final class TravelStore: @unchecked Sendable {
               category: r.string("category").flatMap(PlaceCategory.init(rawValue:)), code: r.string("code"),
               favorite: r.bool("favorite"), notes: r.string("notes"),
               source: RecordSource(rawValue: r.string("source") ?? "") ?? .inferred, mergedInto: r.string("merged_into"),
-              createdAt: r.date("created_at") ?? Date(), updatedAt: r.date("updated_at") ?? Date())
+              deleted: r.bool("deleted"), createdAt: r.date("created_at") ?? Date(), updatedAt: r.date("updated_at") ?? Date())
     }
 
     public struct PlaceStats: Sendable {
