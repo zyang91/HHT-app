@@ -149,7 +149,7 @@ public final class EditService {
     public func setVisitPlace(_ visitID: String, placeID: String) throws {
         try db.transaction {
             var v = try visitOrThrow(visitID)
-            guard try store.place(placeID) != nil else { throw EditError.notFound("place \(placeID)") }
+            guard let p = try store.place(placeID), !p.deleted else { throw EditError.notFound("place \(placeID)") }
             let old = v.placeID
             v.placeID = placeID
             touch(&v)
@@ -208,6 +208,20 @@ public final class EditService {
             src.updatedAt = Date()
             try store.upsertPlace(src)
             try store.audit("place", sourceID, "merge", field: "merged_into", old: nil, new: "\(targetID) (\(n) visits)")
+        }
+    }
+
+    /// "This isn't a real place": every visit there is deleted like "This wasn't a stop" (neighbouring trips
+    /// are joined), and the place is soft-deleted so it leaves the place list and is no longer matched.
+    public func deletePlace(_ placeID: String) throws {
+        try db.transaction {
+            guard var p = try store.place(placeID), !p.deleted else { throw EditError.notFound("place \(placeID)") }
+            let visits = try store.visits(atPlace: placeID)
+            for v in visits { try deleteVisit(v.id) }
+            p.deleted = true
+            p.updatedAt = Date()
+            try store.upsertPlace(p)
+            try store.audit("place", placeID, "delete", field: "visits_deleted", new: String(visits.count))
         }
     }
 

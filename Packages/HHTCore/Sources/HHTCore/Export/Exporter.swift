@@ -253,7 +253,7 @@ public final class Exporter {
                        (SELECT COUNT(*) FROM visits v WHERE v.place_id = p.id AND v.deleted = 0) AS visit_count,
                        (SELECT MIN(arrival_ts) FROM visits v WHERE v.place_id = p.id AND v.deleted = 0) AS first_visit_ts,
                        (SELECT MAX(arrival_ts) FROM visits v WHERE v.place_id = p.id AND v.deleted = 0) AS last_visit_ts
-                FROM places p ORDER BY p.name
+                FROM places p WHERE p.deleted = 0 ORDER BY p.name
                 """))
             try write("flights.csv", try queryCSV("SELECT id AS flight_id, * FROM flights ORDER BY date"))
             try write("life_phases.csv", try queryCSV("SELECT * FROM life_phases ORDER BY start_date"))
