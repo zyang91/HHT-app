@@ -266,6 +266,7 @@ public final class InferenceEngine {
             }
             progress(.finalizing, stays.count, of: stays.count)
             try store.pruneOrphanPlaces()
+            try store.pruneOrphanFlights()
         }
         try store.setMeta("last_inference_at", iso(now))
         return report
@@ -327,6 +328,12 @@ public final class InferenceEngine {
 
     private func linkFlight(for trip: Trip, from a: Visit, to b: Visit) throws {
         guard try store.flight(tripID: trip.id) == nil else { return }
+        // a rebuilt trip gets a new id; re-attach the flight its predecessor left behind (keeps seat, number, notes)
+        if var f = try store.unlinkedFlight(overlapping: trip.departure, trip.arrival) {
+            f.tripID = trip.id
+            try store.upsertFlight(f)
+            return
+        }
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
         fmt.timeZone = trip.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current

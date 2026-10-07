@@ -204,6 +204,42 @@ struct InferenceTests {
         #expect((flights[0].distance ?? 0) > 3_000_000)
     }
 
+    // Issue #27: every rerun rebuilt the airplane trip with a new id and added another flight row.
+    @Test func reprocessDoesNotDuplicateFlights() throws {
+        var tr = Trajectory(start: Trajectory.date("2026-08-18 06:00"), at: Philly.phl)
+        tr.stay(minutes: 90)
+        tr.move(to: Philly.slc, speed: 230, noGPS: true)
+        tr.tz = "America/Denver"
+        tr.stay(minutes: 60)
+        let (store, _, _) = try run(tr)
+        var f = try #require(try store.flights().first)
+        f.seat = "16A"; f.updatedAt = Date().addingTimeInterval(5)
+        try store.upsertFlight(f)
+
+        let engine = InferenceEngine(store: store)
+        for _ in 0..<3 { try engine.process(from: .distantPast, to: tr.t, now: tr.t.addingTimeInterval(60)) }
+        let trips = try store.allTrips()
+        let flights = try store.flights()
+        #expect(flights.count == 1)
+        #expect(flights.first?.id == f.id)
+        #expect(flights.first?.seat == "16A")
+        #expect(flights.first?.tripID == trips.first?.id)
+    }
+
+    // Issue #27: fixes from the phone (Atlanta, a 1.6 km walk). After 12 min standing still, one fix lands 210 m away
+    // 2 s later (~105 m/s → "air"); the still time joins the next moving class, so the walk ended in an "airplane" segment.
+    @Test func gpsJumpAfterWaitIsNotAFlight() {
+        let t0 = Trajectory.date("2026-10-01 18:01")
+        let fixes: [(Double, Double, Double, String)] = [
+            (33, 33.78574, -84.37784, "anchor"), (50, 33.78643, -84.38207, "visit_arrival"), (67, 33.7866, -84.38004, "gps"),
+            (99, 33.78651, -84.38039, "gps"), (358, 33.78641, -84.38207, "gps"), (380, 33.78644, -84.38233, "gps"),
+            (1131, 33.78599, -84.38433, "significant_change"), (1133, 33.78641, -84.38207, "anchor"),
+        ]
+        let path = fixes.map { RawPoint(timestamp: t0.addingTimeInterval($0.0), coordinate: Coordinate($0.1, $0.2), source: $0.3) }
+        let segs = ModeClassifier().segment(path: path, motion: MotionTimeline([]))
+        #expect(!segs.contains { $0.mode == .airplane })
+    }
+
     // 14. several days without opening the app, and incremental == one-shot (no duplicates)
     @Test func multiDayIncrementalMatchesOneShot() throws {
         var tr = Trajectory(start: Trajectory.date("2026-09-01 00:00"), at: Philly.home)
