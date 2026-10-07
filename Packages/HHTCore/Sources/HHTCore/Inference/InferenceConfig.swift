@@ -42,6 +42,8 @@ public struct InferenceConfig: Sendable, Codable, Equatable {
     public var walkMaxSpeed: Double = 2.2         // ~8 km/h
     public var bikeMaxSpeed: Double = 7.0         // ~25 km/h
     public var airMinSpeed: Double = 70           // ~250 km/h
+    /// Shortest run (m) that can be called a flight; faster-than-car hops below this are GPS jumps.
+    public var airMinDistance: Double = 50_000
     public var intercityRailMinSpeed: Double = 38 // ~137 km/h sustained (p90)
     public var intercityMinDistance: Double = 60_000
 

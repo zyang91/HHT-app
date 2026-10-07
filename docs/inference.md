@@ -51,7 +51,8 @@ Distance = path length (straight line across gaps). `has_gap` = any > 15 min hol
 **Segmentation**: run-length encode the classes; repeatedly absorb the shortest run under `minSegmentDuration` [120 s]
 into its longer neighbour. Short access walks under 2 min are therefore folded into the vehicle segment.
 
-**Segment refinement** (vehicle): airplane if avg ≥ 0.6·air speed over > 150 km; intercity rail if ≥ 60 km with
+**Segment refinement**: an air run shorter than `airMinDistance` [50 km] is a GPS jump and is refined as vehicle.
+Vehicle runs: airplane if avg ≥ 0.6·air speed over > 150 km; intercity rail if ≥ 60 km with
 p90 speed 38–70 m/s (conf 0.35); subway if > 40 % of time is signal loss (no fix for > `movingGapThreshold` [120 s]
 while covering > 300 m) at 4–25 m/s over < 40 km (conf 0.4); else car (conf 0.4–0.5). Bus vs car is not separable
 without GTFS; correct it once and personalisation handles repeats.
@@ -65,7 +66,9 @@ when it contradicts the geometry's mode group.
 
 A trip **needs review** when it is untouched and its mode is unknown or has confidence < 0.5.
 
-Airplane trips also create a `flights` row.
+Airplane trips also create a `flights` row. When reprocessing rebuilds an airplane trip, the flight left behind by the
+old trip is re-attached (keeping seat, flight number, notes) instead of a new row being added; inferred flights that end up
+with no trip and no user-entered details are removed.
 
 ## 5. Confidence
 - Visit: 0.5 + 0.5 × min(1, fixes/5) × min(1, duration/20 min).

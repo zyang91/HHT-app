@@ -148,9 +148,9 @@ public struct ModeClassifier: Sendable {
         case .walk: return (.walk, hasMotion ? 0.85 : 0.65)
         case .run: return (.run, hasMotion ? 0.8 : 0.5)
         case .bike: return (.bicycle, hasMotion ? 0.75 : 0.4)
-        case .air: return (.airplane, dist > 100_000 ? 0.9 : 0.6)
+        case .air where dist >= config.airMinDistance: return (.airplane, dist > 100_000 ? 0.9 : 0.6)
         case .still: return (.unknown, 0.2)
-        case .vehicle:
+        case .air, .vehicle:   // a short "air" run is a GPS jump, not a flight
             if avg >= config.airMinSpeed * 0.6 && dist > 150_000 { return (.airplane, 0.75) }
             if dist >= config.intercityMinDistance && p90 >= config.intercityRailMinSpeed && p90 < config.airMinSpeed {
                 return (.intercityRail, 0.35)

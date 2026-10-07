@@ -394,6 +394,25 @@ public final class TravelStore: @unchecked Sendable {
         try db.query("SELECT * FROM flights WHERE trip_id = ?", tripID).first.map(Self.flight)
     }
 
+    /// An inferred flight that lost its trip (the trip was rebuilt or deleted) and overlaps the given window.
+    public func unlinkedFlight(overlapping start: Date, _ end: Date) throws -> Flight? {
+        try db.query("""
+            SELECT * FROM flights WHERE trip_id IS NULL AND source = 'inferred'
+              AND departure_ts <= ? AND COALESCE(arrival_ts, departure_ts) >= ?
+            ORDER BY updated_at DESC LIMIT 1
+            """, end, start).first.map(Self.flight)
+    }
+
+    /// Drop inferred flights that have no trip and nothing the user typed into them.
+    public func pruneOrphanFlights() throws {
+        try db.run("""
+            DELETE FROM flights WHERE trip_id IS NULL AND journey_id IS NULL AND source = 'inferred'
+              AND airline IS NULL AND flight_number IS NULL AND aircraft_type IS NULL AND seat IS NULL
+              AND cabin IS NULL AND booking_reference IS NULL AND notes IS NULL
+              AND updated_at - created_at < 1
+            """)
+    }
+
     public func deleteFlight(_ id: String) throws {
         try db.run("DELETE FROM flights WHERE id = ?", id)
         try audit("flight", id, "delete")
